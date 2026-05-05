@@ -57,6 +57,8 @@ If the display cannot connect to Wi-Fi, open the system menu on the display and 
 
 Open the page from a notebook or phone, scan nearby networks, then save the SSID and password. The saved network is stored in the ESP32 flash and takes priority over the compile-time credentials.
 
+After saving Wi-Fi details, the setup page shows live connection status. The setup hotspot stays online while the display is connecting, then turns off a few seconds after a successful connection. If connection fails, the hotspot stays online and the page shows the Wi-Fi status so the network name or password can be corrected.
+
 When the setup hotspot is active, the display shows the hotspot SSID, password and `192.168.4.1` address directly on the screen. Tap `OFFLINE MODE` on the display to hide the hotspot and keep using cached/offline screens. In the status menu, tap `HOTSPOT` to start the setup hotspot again.
 
 The same setup page also lets you choose the display time offset from `UTC -12:00` to `UTC +14:00`.

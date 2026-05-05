@@ -49,6 +49,8 @@ constexpr uint32_t BLOCK_REFRESH_MS = 2UL * 60UL * 1000UL;
 constexpr uint32_t FEES_REFRESH_MS = 2UL * 60UL * 1000UL;
 constexpr uint32_t WIFI_RETRY_MS = 10000;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 7000;
+constexpr uint32_t WIFI_PORTAL_CONNECT_TIMEOUT_MS = 30000;
+constexpr uint32_t WIFI_PORTAL_CLOSE_DELAY_MS = 8000;
 constexpr uint32_t WIFI_SCAN_MS_PER_CHANNEL = 650;
 constexpr uint8_t WIFI_SCAN_MAX_RESULTS = 24;
 constexpr uint32_t HTTP_TIMEOUT_MS = 6000;
@@ -163,6 +165,12 @@ String provisionedWifiPassword = "";
 bool configPortalActive = false;
 bool configPortalRoutesReady = false;
 bool wifiSetupOfflineMode = false;
+bool portalConnectPending = false;
+bool portalConnectSucceeded = false;
+uint32_t portalConnectStartedMs = 0;
+uint32_t portalConnectDoneMs = 0;
+String portalConnectSsid = "";
+String portalConnectError = "";
 uint32_t wifiDisconnectedSinceMs = 0;
 uint32_t lastPriceFetchedAt = 0;
 uint32_t lastPriceFetchedEpoch = 0;
@@ -254,6 +262,7 @@ uint32_t internetBackoffUntilMs = 0;
 void renderCurrentScreen(bool loading);
 void handleTouch();
 void handleConfigPortal();
+void configureClockIfNeeded();
 int32_t pragueUtcOffsetSeconds(time_t utcNow);
 
 uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -471,6 +480,75 @@ String htmlEscape(const String& input) {
   return out;
 }
 
+String jsonEscape(const String& input) {
+  String out;
+  out.reserve(input.length() + 8);
+  for (size_t i = 0; i < input.length(); ++i) {
+    char c = input[i];
+    if (c == '\\') {
+      out += "\\\\";
+    } else if (c == '"') {
+      out += "\\\"";
+    } else if (c == '\n') {
+      out += "\\n";
+    } else if (c == '\r') {
+      out += "\\r";
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+const char* wifiStatusName(wl_status_t status);
+
+String currentPortalConnectState() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return "connected";
+  }
+  if (portalConnectPending) {
+    return "connecting";
+  }
+  if (portalConnectError.length()) {
+    return "failed";
+  }
+  return "idle";
+}
+
+String currentPortalConnectMessage() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return "Connected. The setup hotspot will turn off soon.";
+  }
+  if (portalConnectPending) {
+    return "Connecting to " + portalConnectSsid + "...";
+  }
+  if (portalConnectError.length()) {
+    return portalConnectError;
+  }
+  return "Waiting for WiFi details.";
+}
+
+String portalStatusJson() {
+  String state = currentPortalConnectState();
+  String message = currentPortalConnectMessage();
+  String detail = WiFi.status() == WL_CONNECTED
+                      ? "IP " + WiFi.localIP().toString()
+                      : "WiFi " + String(wifiStatusName(WiFi.status()));
+  String json;
+  json.reserve(220);
+  json += F("{\"state\":\"");
+  json += jsonEscape(state);
+  json += F("\",\"message\":\"");
+  json += jsonEscape(message);
+  json += F("\",\"detail\":\"");
+  json += jsonEscape(detail);
+  json += F("\",\"ssid\":\"");
+  json += jsonEscape(portalConnectSsid.length() ? portalConnectSsid
+                                                : activeWifiSsid());
+  json += F("\"}");
+  return json;
+}
+
 int16_t scanSetupNetworks() {
   WiFi.scanDelete();
   WiFi.mode(WIFI_AP_STA);
@@ -571,13 +649,64 @@ String wifiSetupPage(const String& message = "", bool scanNetworks = true) {
   page += F("<label for='pass'>Password</label>");
   page += F("<input id='pass' name='pass' type='password' maxlength='64' autocomplete='current-password'>");
   page += F("<button type='submit'>Save WiFi</button></form>");
-  page += F("<a class='btn' href='/'>Scan again</a>");
+  page += F("<a class='btn' href='/scan'>Scan again</a>");
   page += F("</main></body></html>");
   return page;
 }
 
+String wifiConnectPage() {
+  String page;
+  page.reserve(5200);
+  page += F("<!doctype html><html><head><meta charset='utf-8'>");
+  page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
+  page += F("<title>BTC Display Setup</title><style>");
+  page += F("body{margin:0;background:#08090a;color:#fafaf4;font:16px Arial,sans-serif}");
+  page += F("main{max-width:620px;margin:0 auto;padding:18px}");
+  page += F("h1{color:#f7931a;font-size:26px;margin:0 0 14px}");
+  page += F(".card{background:#111315;border:1px solid #3c2a14;border-radius:8px;padding:16px;margin-top:16px}");
+  page += F(".muted{color:#968c7c;font-size:14px;line-height:1.35}");
+  page += F(".state{font-size:20px;font-weight:700;margin:10px 0}.ok{color:#2ddc78}.bad{color:#ee4c4c}.wait{color:#f7931a}");
+  page += F("a.btn{display:block;text-align:center;margin-top:14px;padding:12px;background:#f7931a;color:#08090a;font-weight:700;text-decoration:none;border-radius:8px}");
+  page += F("</style></head><body><main><h1>BTC Display Setup</h1>");
+  page += F("<div class='card'><div class='muted'>Saved to flash</div>");
+  page += F("<div id='state' class='state wait'>");
+  page += htmlEscape(currentPortalConnectMessage());
+  page += F("</div><div id='detail' class='muted'>");
+  page += htmlEscape(String("WiFi ") + wifiStatusName(WiFi.status()));
+  page += F("</div><p class='muted'>Keep this page open. If connection works, this hotspot will turn off after a few seconds.</p>");
+  page += F("<a class='btn' href='/'>Edit WiFi</a></div>");
+  page += F("<script>");
+  page += F("async function poll(){try{let r=await fetch('/status',{cache:'no-store'});let s=await r.json();let e=document.getElementById('state');e.textContent=s.message;e.className='state '+(s.state==='connected'?'ok':s.state==='failed'?'bad':'wait');document.getElementById('detail').textContent=s.detail;}catch(err){document.getElementById('detail').textContent='Waiting for setup hotspot...';}setTimeout(poll,2000);}poll();");
+  page += F("</script></main></body></html>");
+  return page;
+}
+
 void handleSetupRoot() {
+  if (portalConnectPending || portalConnectSucceeded) {
+    setupServer.send(200, "text/html", wifiConnectPage());
+    return;
+  }
   setupServer.send(200, "text/html", wifiSetupPage());
+}
+
+void handleSetupScan() {
+  if (portalConnectPending || portalConnectSucceeded) {
+    setupServer.send(200, "text/html", wifiConnectPage());
+    return;
+  }
+  setupServer.send(200, "text/html", wifiSetupPage("", true));
+}
+
+void handleSetupStatus() {
+  setupServer.send(200, "application/json", portalStatusJson());
+}
+
+void handleSetupNotFound() {
+  if (setupServer.uri() == "/favicon.ico") {
+    setupServer.send(204, "text/plain", "");
+    return;
+  }
+  setupServer.send(404, "text/html", wifiSetupPage("Page not found.", false));
 }
 
 void handleSetupSave() {
@@ -594,19 +723,23 @@ void handleSetupSave() {
   cachePrefs.putString("wifiSsid", provisionedWifiSsid);
   cachePrefs.putString("wifiPass", provisionedWifiPassword);
 
+  portalConnectPending = true;
+  portalConnectSucceeded = false;
+  portalConnectStartedMs = millis();
+  portalConnectDoneMs = 0;
+  portalConnectSsid = provisionedWifiSsid;
+  portalConnectError = "";
   nextWifiAttemptMs = 0;
   nextNetworkRequestAllowedMs = 0;
   internetBackoffUntilMs = 0;
   saveWifiOfflineMode(false);
-  lastWifiStatus = "WiFi saved";
-  WiFi.disconnect(false);
-  setupServer.send(200, "text/html",
-                   wifiSetupPage("Saved. The display is trying to connect.",
-                                 false));
+  lastWifiStatus = "WiFi connecting";
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleep(false);
+  WiFi.disconnect(false, false);
+  delay(100);
   WiFi.begin(provisionedWifiSsid.c_str(), provisionedWifiPassword.c_str());
-  lastWifiStatus = "WiFi connecting";
+  setupServer.send(200, "text/html", wifiConnectPage());
   renderCurrentScreen(false);
 }
 
@@ -627,9 +760,11 @@ void setupConfigPortalRoutes() {
     return;
   }
   setupServer.on("/", HTTP_GET, handleSetupRoot);
+  setupServer.on("/scan", HTTP_GET, handleSetupScan);
+  setupServer.on("/status", HTTP_GET, handleSetupStatus);
   setupServer.on("/save", HTTP_POST, handleSetupSave);
   setupServer.on("/time", HTTP_POST, handleSetupTimeSave);
-  setupServer.onNotFound(handleSetupRoot);
+  setupServer.onNotFound(handleSetupNotFound);
   configPortalRoutesReady = true;
 }
 
@@ -638,6 +773,11 @@ void startConfigPortal() {
     return;
   }
   saveWifiOfflineMode(false);
+  portalConnectPending = false;
+  portalConnectSucceeded = false;
+  portalConnectStartedMs = 0;
+  portalConnectDoneMs = 0;
+  portalConnectError = "";
   setupConfigPortalRoutes();
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleep(false);
@@ -658,12 +798,16 @@ void stopConfigPortal() {
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   configPortalActive = false;
+  portalConnectPending = false;
   Serial.println("Setup AP stopped");
   renderCurrentScreen(false);
 }
 
 void enterWifiOfflineMode() {
   saveWifiOfflineMode(true);
+  portalConnectPending = false;
+  portalConnectSucceeded = false;
+  portalConnectError = "";
   if (configPortalActive) {
     stopConfigPortal();
   }
@@ -685,12 +829,37 @@ void handleConfigPortal() {
     setupServer.handleClient();
   }
 
+  if (configPortalActive && portalConnectPending) {
+    if (WiFi.status() == WL_CONNECTED) {
+      portalConnectPending = false;
+      portalConnectSucceeded = true;
+      portalConnectDoneMs = millis();
+      portalConnectError = "";
+      configureClockIfNeeded();
+      lastWifiStatus = "WiFi OK";
+    } else if (millis() - portalConnectStartedMs >
+               WIFI_PORTAL_CONNECT_TIMEOUT_MS) {
+      portalConnectPending = false;
+      portalConnectSucceeded = false;
+      portalConnectError = "Connection failed: " +
+                           String(wifiStatusName(WiFi.status()));
+      lastWifiStatus = portalConnectError;
+      WiFi.disconnect(false, false);
+      renderCurrentScreen(false);
+    }
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
     wifiDisconnectedSinceMs = 0;
     if (wifiSetupOfflineMode) {
       saveWifiOfflineMode(false);
     }
-    if (configPortalActive) {
+    if (configPortalActive && !portalConnectSucceeded) {
+      portalConnectSucceeded = true;
+      portalConnectDoneMs = millis();
+    }
+    if (configPortalActive && portalConnectSucceeded &&
+        millis() - portalConnectDoneMs >= WIFI_PORTAL_CLOSE_DELAY_MS) {
       stopConfigPortal();
     }
     return;
@@ -1913,6 +2082,11 @@ bool ensureWifi(String& status) {
     lastWifiStatus = status;
     nextWifiAttemptMs = 0;
     return true;
+  }
+
+  if (configPortalActive && portalConnectPending) {
+    status = lastWifiStatus;
+    return false;
   }
 
   if (millis() < nextWifiAttemptMs) {
