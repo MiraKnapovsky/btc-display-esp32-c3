@@ -1,10 +1,12 @@
 # BTC display for ESP32-2424S012C-I-Y(B)
 
-Firmware for a small round ESP32-C3 Bitcoin dashboard. It shows the current BTC price, 30 day and 1 year charts, Fear & Greed index, halving/block data, mempool fees, connection status, cache age and display brightness settings.
+Firmware for a small round ESP32-C3 Bitcoin dashboard. It shows the current BTC price, 24 hour, 30 day and 1 year charts, Fear & Greed index, halving/block data, mempool fees, connection status, cache age and display brightness settings.
 
 ## Device
 
 Tested on the black shell `ESP32-2424S012C-I-Y(B)` board, sold as a 1.28 inch capacitive touch circular ESP32 display.
+
+Device listing: [ESP32-C3 1.28 inch circular capacitive touch display](https://www.alibaba.com/product-detail/ESP32-C3-1-28-inch-circular_1601475073494.html)
 
 Known hardware from this build:
 
@@ -17,7 +19,8 @@ Known hardware from this build:
 ## Screens
 
 ![Price screen](docs/screenshots/price.svg)
-![Chart screen](docs/screenshots/chart.svg)
+![24 hour chart screen](docs/screenshots/chart.svg)
+![30 day chart screen](docs/screenshots/chart-30d.svg)
 ![Fear and Greed screen](docs/screenshots/fear-greed.svg)
 ![Halving screen](docs/screenshots/halving.svg)
 ![Mempool fees screen](docs/screenshots/fees.svg)
@@ -28,7 +31,8 @@ Known hardware from this build:
 
 - BTC/USDT price from Binance
 - 24 hour percent and dollar move
-- 30 day and 1 year charts
+- 24 hour, 30 day and 1 year charts
+- Chart refresh intervals: 24H every 5 minutes, 30D every 2 hours, 1Y every 6 hours
 - Fear & Greed index
 - Current Bitcoin block height and halving countdown
 - Mempool fee panel

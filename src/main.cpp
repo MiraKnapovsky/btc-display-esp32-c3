@@ -38,7 +38,9 @@ constexpr int8_t TOUCH_INT = 0;
 constexpr int8_t TOUCH_RST = 1;
 
 constexpr uint32_t PRICE_REFRESH_MS = 60000;
-constexpr uint32_t CHART_REFRESH_MS = 6UL * 60UL * 60UL * 1000UL;
+constexpr uint32_t CHART24_REFRESH_MS = 5UL * 60UL * 1000UL;
+constexpr uint32_t CHART30_REFRESH_MS = 2UL * 60UL * 60UL * 1000UL;
+constexpr uint32_t CHART365_REFRESH_MS = 6UL * 60UL * 60UL * 1000UL;
 constexpr uint32_t FEAR_GREED_REFRESH_MS = 30UL * 60UL * 1000UL;
 constexpr uint32_t BLOCK_REFRESH_MS = 2UL * 60UL * 1000UL;
 constexpr uint32_t FEES_REFRESH_MS = 2UL * 60UL * 1000UL;
@@ -52,7 +54,7 @@ constexpr uint32_t AGE_GREEN_SEC = 10UL * 60UL;
 constexpr uint32_t AGE_BLUE_SEC = 60UL * 60UL;
 constexpr uint32_t AGE_YELLOW_SEC = 12UL * 60UL * 60UL;
 constexpr uint32_t AGE_RED_SEC = 24UL * 60UL * 60UL;
-constexpr uint8_t PAGE_COUNT = 6;
+constexpr uint8_t PAGE_COUNT = 7;
 constexpr uint16_t MENU_EDGE_W = 54;
 constexpr int HALVING_INTERVAL = 210000;
 constexpr uint32_t CACHE_VERSION = 2;
@@ -64,12 +66,13 @@ constexpr uint32_t BRIGHTNESS_HOLD_REPEAT_MS = 170;
 
 enum class Screen : uint8_t {
   Price = 0,
-  Chart30 = 1,
-  Chart365 = 2,
-  FearGreed = 3,
-  Halving = 4,
-  Fees = 5,
-  Status = 6,
+  Chart24 = 1,
+  Chart30 = 2,
+  Chart365 = 3,
+  FearGreed = 4,
+  Halving = 5,
+  Fees = 6,
+  Status = 7,
 };
 
 class LGFX : public lgfx::LGFX_Device {
@@ -178,6 +181,14 @@ uint32_t feesNextAttempt = 0;
 uint32_t feesFetchedAt = 0;
 uint32_t feesFetchedEpoch = 0;
 uint32_t feesCacheSavedAt = 0;
+
+float chart24[48];
+size_t chart24Count = 0;
+uint32_t chart24FetchedAt = 0;
+uint32_t chart24FetchedEpoch = 0;
+uint32_t chart24CacheSavedAt = 0;
+uint32_t chart24NextAttempt = 0;
+String chart24Status = "not loaded";
 
 float chart30[30];
 size_t chart30Count = 0;
@@ -401,16 +412,18 @@ uint16_t freshnessColor(uint32_t fetchedAt, uint32_t fetchedEpoch) {
   return rgb(238, 76, 76);
 }
 
-bool shouldDrawFreshnessDot(uint32_t fetchedAt, uint32_t fetchedEpoch) {
+bool shouldDrawFreshnessDot(uint32_t fetchedAt, uint32_t fetchedEpoch,
+                            uint32_t dotAfterSec = AGE_GREEN_SEC) {
   if (fetchedAt == 0 && fetchedEpoch == 0) {
     return false;
   }
   int32_t ageSec = dataAgeSeconds(fetchedAt, fetchedEpoch);
-  return ageSec < 0 || ageSec >= static_cast<int32_t>(AGE_GREEN_SEC);
+  return ageSec < 0 || ageSec >= static_cast<int32_t>(dotAfterSec);
 }
 
-void drawFreshnessDot(int x, int y, uint32_t fetchedAt, uint32_t fetchedEpoch) {
-  if (!shouldDrawFreshnessDot(fetchedAt, fetchedEpoch)) {
+void drawFreshnessDot(int x, int y, uint32_t fetchedAt, uint32_t fetchedEpoch,
+                      uint32_t dotAfterSec = AGE_GREEN_SEC) {
+  if (!shouldDrawFreshnessDot(fetchedAt, fetchedEpoch, dotAfterSec)) {
     return;
   }
   display.fillCircle(x, y, 4, freshnessColor(fetchedAt, fetchedEpoch));
@@ -425,11 +438,12 @@ int currentClockMinute() {
   return info.tm_hour * 60 + info.tm_min;
 }
 
-void drawFooterClock(int y, uint32_t fetchedAt = 0, uint32_t fetchedEpoch = 0) {
+void drawFooterClock(int y, uint32_t fetchedAt = 0, uint32_t fetchedEpoch = 0,
+                     uint32_t dotAfterSec = AGE_GREEN_SEC) {
   display.setTextDatum(middle_center);
   display.setTextColor(btcOrange(), TFT_BLACK);
   display.drawString(clockText(), SCREEN_W / 2, y, 2);
-  drawFreshnessDot(222, SCREEN_H / 2, fetchedAt, fetchedEpoch);
+  drawFreshnessDot(222, SCREEN_H / 2, fetchedAt, fetchedEpoch, dotAfterSec);
 }
 
 void drawPageDots() {
@@ -597,8 +611,9 @@ void drawStatusRow(int y, const char* label, const String& value,
 }
 
 void drawStatusAgeRow(int y, const char* label, uint32_t fetchedAt,
-                      uint32_t fetchedEpoch) {
-  drawFreshnessDot(30, y, fetchedAt, fetchedEpoch);
+                      uint32_t fetchedEpoch,
+                      uint32_t dotAfterSec = AGE_GREEN_SEC) {
+  drawFreshnessDot(30, y, fetchedAt, fetchedEpoch, dotAfterSec);
   display.setTextDatum(middle_left);
   display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
   display.drawString(label, 42, y, 1);
@@ -678,7 +693,8 @@ void drawPriceScreen(const String& price, const String& status,
 
 void drawChartScreen(const char* title, const float* data, size_t count,
                      const String& status, uint32_t fetchedAt,
-                     uint32_t fetchedEpoch, bool loading = false) {
+                     uint32_t fetchedEpoch, bool loading = false,
+                     uint32_t dotAfterSec = AGE_GREEN_SEC) {
   drawBase();
   drawCenteredText(title, 27, 2, btcOrange());
 
@@ -687,7 +703,7 @@ void drawChartScreen(const char* title, const float* data, size_t count,
     display.setTextDatum(middle_center);
     display.setTextColor(rgb(135, 150, 150), TFT_BLACK);
     display.drawString(status, SCREEN_W / 2, 176, 2);
-    drawFooterClock(211, fetchedAt, fetchedEpoch);
+    drawFooterClock(211, fetchedAt, fetchedEpoch, dotAfterSec);
     drawPageDots();
     return;
   }
@@ -697,7 +713,7 @@ void drawChartScreen(const char* title, const float* data, size_t count,
     display.setTextDatum(middle_center);
     display.setTextColor(rgb(135, 150, 150), TFT_BLACK);
     display.drawString(status, SCREEN_W / 2, 176, 2);
-    drawFooterClock(211, fetchedAt, fetchedEpoch);
+    drawFooterClock(211, fetchedAt, fetchedEpoch, dotAfterSec);
     drawPageDots();
     return;
   }
@@ -761,7 +777,7 @@ void drawChartScreen(const char* title, const float* data, size_t count,
   display.drawString("MIN " + formatDollars(minValue) + "  MAX " +
                          formatDollars(maxValue),
                      SCREEN_W / 2, 206, 1);
-  drawFooterClock(218, fetchedAt, fetchedEpoch);
+  drawFooterClock(218, fetchedAt, fetchedEpoch, dotAfterSec);
   drawPageDots();
 }
 
@@ -960,15 +976,19 @@ void drawStatusScreen() {
     drawStatusAgeRow(172, "BLK", blockFetchedAt, blockFetchedEpoch);
     drawStatusAgeRow(188, "FEE", feesFetchedAt, feesFetchedEpoch);
   } else if (statusPage == 1) {
-    drawStatusAgeRow(86, "30D", chart30FetchedAt, chart30FetchedEpoch);
-    drawStatusAgeRow(102, "1Y", chart365FetchedAt, chart365FetchedEpoch);
-    drawStatusRow(122, "SSID", String(WIFI_SSID), rgb(250, 250, 244));
-    drawStatusRow(140, "Price", lastPrice.length() ? lastPrice : "--",
+    drawStatusAgeRow(78, "24H", chart24FetchedAt, chart24FetchedEpoch,
+                     CHART24_REFRESH_MS / 1000UL);
+    drawStatusAgeRow(94, "30D", chart30FetchedAt, chart30FetchedEpoch,
+                     CHART30_REFRESH_MS / 1000UL);
+    drawStatusAgeRow(110, "1Y", chart365FetchedAt, chart365FetchedEpoch,
+                     CHART365_REFRESH_MS / 1000UL);
+    drawStatusRow(130, "SSID", String(WIFI_SSID), rgb(250, 250, 244));
+    drawStatusRow(148, "Price", lastPrice.length() ? lastPrice : "--",
                   rgb(250, 250, 244));
-    drawStatusRow(158, "Block",
+    drawStatusRow(166, "Block",
                   blockHeight > 0 ? formatInteger(blockHeight) : "--",
                   rgb(250, 250, 244));
-    drawStatusRow(176, "Fee",
+    drawStatusRow(184, "Fee",
                   feeFastest >= 0 ? String(feeFastest) + " sat/vB" : "--",
                   feeColor(feeFastest));
   } else {
@@ -981,13 +1001,20 @@ void renderCurrentScreen(bool loading = false) {
     case Screen::Price:
       drawPriceScreen(lastPrice, lastStatus, loading);
       break;
+    case Screen::Chart24:
+      drawChartScreen("BTC/USD 24H", chart24, chart24Count, chart24Status,
+                      chart24FetchedAt, chart24FetchedEpoch, loading,
+                      CHART24_REFRESH_MS / 1000UL);
+      break;
     case Screen::Chart30:
       drawChartScreen("BTC/USD 30D", chart30, chart30Count, chart30Status,
-                      chart30FetchedAt, chart30FetchedEpoch, loading);
+                      chart30FetchedAt, chart30FetchedEpoch, loading,
+                      CHART30_REFRESH_MS / 1000UL);
       break;
     case Screen::Chart365:
       drawChartScreen("BTC/USD 1Y", chart365, chart365Count, chart365Status,
-                      chart365FetchedAt, chart365FetchedEpoch, loading);
+                      chart365FetchedAt, chart365FetchedEpoch, loading,
+                      CHART365_REFRESH_MS / 1000UL);
       break;
     case Screen::FearGreed:
       drawFearGreedScreen(loading);
@@ -1205,6 +1232,15 @@ void saveFeesCache(bool force = false) {
   cachePrefs.putUInt("fepoch", feesFetchedEpoch);
 }
 
+void saveChart24Cache(bool force = false) {
+  if (chart24Count < 2 || !shouldSaveCache(chart24CacheSavedAt, force)) {
+    return;
+  }
+  cachePrefs.putUInt("c24cnt", static_cast<uint32_t>(chart24Count));
+  cachePrefs.putUInt("c24epoch", chart24FetchedEpoch);
+  cachePrefs.putBytes("c24data", chart24, chart24Count * sizeof(float));
+}
+
 void saveChart30Cache(bool force = false) {
   if (chart30Count < 2 || !shouldSaveCache(chart30CacheSavedAt, force)) {
     return;
@@ -1264,6 +1300,19 @@ void loadCache() {
     feesStatus = "cache";
   }
 
+  size_t c24Bytes = cachePrefs.isKey("c24data")
+                        ? cachePrefs.getBytesLength("c24data")
+                        : 0;
+  uint32_t c24Count = cachePrefs.getUInt("c24cnt", 0);
+  if (c24Bytes >= 2 * sizeof(float) && c24Count > 1) {
+    size_t available = c24Bytes / sizeof(float);
+    chart24Count = min(static_cast<size_t>(48),
+                       min(static_cast<size_t>(c24Count), available));
+    cachePrefs.getBytes("c24data", chart24, chart24Count * sizeof(float));
+    chart24FetchedEpoch = cachePrefs.getUInt("c24epoch", 0);
+    chart24Status = "cache";
+  }
+
   size_t c30Bytes = cachePrefs.isKey("c30data")
                         ? cachePrefs.getBytesLength("c30data")
                         : 0;
@@ -1290,8 +1339,10 @@ void loadCache() {
     chart365Status = "cache";
   }
 
-  Serial.printf("Cache loaded: price=%s fg=%d block=%d fee=%d c30=%u c365=%u\n",
+  Serial.printf(
+      "Cache loaded: price=%s fg=%d block=%d fee=%d c24=%u c30=%u c365=%u\n",
                 lastPrice.c_str(), fearGreedValue, blockHeight, feeFastest,
+                static_cast<unsigned>(chart24Count),
                 static_cast<unsigned>(chart30Count),
                 static_cast<unsigned>(chart365Count));
 }
@@ -1740,7 +1791,8 @@ void refreshFeesIfNeeded(bool drawLoading, bool force = false) {
 }
 
 bool chartStale(uint32_t fetchedAt, uint32_t fetchedEpoch, size_t count,
-                uint32_t nextAttempt, bool force = false) {
+                uint32_t nextAttempt, uint32_t refreshMs,
+                bool force = false) {
   if (force) {
     return true;
   }
@@ -1752,14 +1804,45 @@ bool chartStale(uint32_t fetchedAt, uint32_t fetchedEpoch, size_t count,
   }
   int32_t ageSec = dataAgeSeconds(fetchedAt, fetchedEpoch);
   if (ageSec >= 0) {
-    return static_cast<uint32_t>(ageSec) > CHART_REFRESH_MS / 1000UL;
+    return static_cast<uint32_t>(ageSec) > refreshMs / 1000UL;
   }
   return false;
 }
 
+bool refreshChart24IfNeeded(bool drawLoading, bool force = false) {
+  if (!chartStale(chart24FetchedAt, chart24FetchedEpoch, chart24Count,
+                  chart24NextAttempt, CHART24_REFRESH_MS, force)) {
+    return false;
+  }
+  if (!networkRequestAllowed(force)) {
+    return false;
+  }
+
+  chart24Status = "loading 24H";
+  if (drawLoading && currentScreen == Screen::Chart24) {
+    renderCurrentScreen(true);
+  }
+  bool ok = fetchKlines("30m", 48, chart24, 48, chart24Count, chart24Status);
+  finishNetworkRequest();
+  if (ok) {
+    markFetchedNow(chart24FetchedAt, chart24FetchedEpoch);
+    chart24NextAttempt = chart24FetchedAt + CHART24_REFRESH_MS;
+    saveChart24Cache(force);
+    Serial.printf("24h chart loaded: %u points\n",
+                  static_cast<unsigned>(chart24Count));
+  } else {
+    chart24NextAttempt = millis() + WIFI_RETRY_MS;
+    Serial.println("24h chart failed: " + chart24Status);
+  }
+  if (currentScreen == Screen::Chart24 || currentScreen == Screen::Status) {
+    renderCurrentScreen(false);
+  }
+  return true;
+}
+
 bool refreshChart30IfNeeded(bool drawLoading, bool force = false) {
   if (!chartStale(chart30FetchedAt, chart30FetchedEpoch, chart30Count,
-                  chart30NextAttempt, force)) {
+                  chart30NextAttempt, CHART30_REFRESH_MS, force)) {
     return false;
   }
   if (!networkRequestAllowed(force)) {
@@ -1774,7 +1857,7 @@ bool refreshChart30IfNeeded(bool drawLoading, bool force = false) {
   finishNetworkRequest();
   if (ok) {
     markFetchedNow(chart30FetchedAt, chart30FetchedEpoch);
-    chart30NextAttempt = chart30FetchedAt + CHART_REFRESH_MS;
+    chart30NextAttempt = chart30FetchedAt + CHART30_REFRESH_MS;
     saveChart30Cache(force);
     Serial.printf("30d chart loaded: %u points\n",
                   static_cast<unsigned>(chart30Count));
@@ -1790,7 +1873,7 @@ bool refreshChart30IfNeeded(bool drawLoading, bool force = false) {
 
 bool refreshChart365IfNeeded(bool drawLoading, bool force = false) {
   if (!chartStale(chart365FetchedAt, chart365FetchedEpoch, chart365Count,
-                  chart365NextAttempt, force)) {
+                  chart365NextAttempt, CHART365_REFRESH_MS, force)) {
     return false;
   }
   if (!networkRequestAllowed(force)) {
@@ -1805,7 +1888,7 @@ bool refreshChart365IfNeeded(bool drawLoading, bool force = false) {
   finishNetworkRequest();
   if (ok) {
     markFetchedNow(chart365FetchedAt, chart365FetchedEpoch);
-    chart365NextAttempt = chart365FetchedAt + CHART_REFRESH_MS;
+    chart365NextAttempt = chart365FetchedAt + CHART365_REFRESH_MS;
     saveChart365Cache(force);
     Serial.printf("1y chart loaded: %u points\n",
                   static_cast<unsigned>(chart365Count));
@@ -1819,17 +1902,20 @@ bool refreshChart365IfNeeded(bool drawLoading, bool force = false) {
   return true;
 }
 
-void preloadChartsWhenIdle() {
-  if (currentScreen != Screen::Price || touchActive ||
-      millis() < nextPreloadAllowedMs ||
+void refreshChartsWhenIdle() {
+  if (touchActive || millis() < nextPreloadAllowedMs ||
       millis() - lastScreenChangeMs < 1500) {
     return;
   }
-  if (refreshChart30IfNeeded(false)) {
+  if (refreshChart24IfNeeded(currentScreen == Screen::Chart24)) {
     nextPreloadAllowedMs = millis() + 1500;
     return;
   }
-  if (refreshChart365IfNeeded(false)) {
+  if (refreshChart30IfNeeded(currentScreen == Screen::Chart30)) {
+    nextPreloadAllowedMs = millis() + 1500;
+    return;
+  }
+  if (refreshChart365IfNeeded(currentScreen == Screen::Chart365)) {
     nextPreloadAllowedMs = millis() + 1500;
   }
 }
@@ -1848,6 +1934,7 @@ void requestManualRefresh() {
   refreshFearGreedIfNeeded(false, true);
   refreshBlockHeightIfNeeded(false, true);
   refreshFeesIfNeeded(false, true);
+  refreshChart24IfNeeded(false, true);
   refreshChart30IfNeeded(false, true);
   refreshChart365IfNeeded(false, true);
   manualRefreshBusy = false;
@@ -2264,6 +2351,6 @@ void loop() {
   refreshBlockHeightIfNeeded(currentScreen == Screen::Halving);
   refreshFeesIfNeeded(currentScreen == Screen::Fees);
   refreshClockDisplayIfNeeded();
-  preloadChartsWhenIdle();
+  refreshChartsWhenIdle();
   delay(50);
 }
