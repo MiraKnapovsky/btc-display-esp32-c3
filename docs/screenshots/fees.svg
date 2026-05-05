@@ -2,7 +2,7 @@
   <rect width="240" height="240" fill="#050607"/>
   <circle cx="120" cy="120" r="118" fill="#08090a"/>
   <circle cx="120" cy="120" r="116" fill="none" stroke="#603d12" stroke-width="2"/>
-  <text x="120" y="31" fill="#f7931a" font-family="Arial, sans-serif" font-size="16" font-weight="700" text-anchor="middle">Mempool fees</text>
+  <text x="120" y="31" fill="#f7931a" font-family="Arial, sans-serif" font-size="15" font-weight="700" text-anchor="middle">Mempool fees</text>
   <text x="120" y="50" fill="#fafaf4" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">BTC $81,709</text>
   <text x="120" y="65" fill="#968c7c" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">sat/vB</text>
   <rect x="30" y="73" width="82" height="42" rx="7" fill="#0f1112" stroke="#f7931a"/>
@@ -18,6 +18,6 @@
   <text x="169" y="137" fill="#968c7c" font-family="Arial, sans-serif" font-size="10" text-anchor="middle">ECO</text>
   <text x="169" y="159" fill="#2ddc78" font-family="Arial, sans-serif" font-size="24" font-weight="700" text-anchor="middle">2</text>
   <text x="120" y="184" fill="#f7931a" font-family="Arial, sans-serif" font-size="15" font-weight="700" text-anchor="middle">normal</text>
-  <text x="120" y="203" fill="#968c7c" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">minimum 2 sat/vB</text>
-  <text x="120" y="222" fill="#f7931a" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">18:42</text>
+  <text x="120" y="202" fill="#968c7c" font-family="Arial, sans-serif" font-size="10" text-anchor="middle">min 2 sat/vB</text>
+  <text x="120" y="218" fill="#f7931a" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">18:42</text>
 </svg>

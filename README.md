@@ -10,10 +10,8 @@ Known hardware from this build:
 
 - MCU: `ESP32-C3-MINI-1U`
 - Display: 240 x 240 round `GC9A01` SPI panel
-- Touch: capacitive `CST816` compatible controller on I2C address `0x15`
+- Touch: capacitive `CST816` compatible controller on I2C address `0x15` (SDA GPIO 4, SCL GPIO 5, INT GPIO 0, RST GPIO 1)
 - Backlight: PWM on GPIO 3
-- Touch I2C: SDA GPIO 4, SCL GPIO 5
-- Touch INT/RST: GPIO 0 / GPIO 1
 - Display SPI: SCLK GPIO 6, MOSI GPIO 7, DC GPIO 2, CS GPIO 10
 
 ## Screens
@@ -69,7 +67,7 @@ platformio run -e esp32-c3-devkitm-1
 platformio run -e esp32-c3-devkitm-1 -t upload
 ```
 
-The default `platformio.ini` uses `COM7`. Change `upload_port` and `monitor_port` if your board appears on a different serial port.
+The default `platformio.ini` uses `COM1`. Change `upload_port` and `monitor_port` if your board appears on a different serial port.
 
 Serial monitor:
 
@@ -94,7 +92,5 @@ platformio device monitor -e esp32-c3-devkitm-1
 - Blocks and fees: mempool.space API
 
 ## Notes
-
-The board can be powered from USB-C or the onboard 1S battery connector. This specific closed-shell unit did not expose a usable battery voltage/charge signal in firmware, so battery percentage is not shown.
 
 HTTPS is used, but the firmware currently calls `setInsecure()` because certificate handling on this small Arduino build is kept simple.

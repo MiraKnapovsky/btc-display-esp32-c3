@@ -800,11 +800,9 @@ void drawFearGreedScreen(bool loading = false) {
   constexpr int outerR = 100;
   constexpr int innerR = 83;
 
-  display.fillArc(cx, cy, outerR, innerR, 180, 216, rgb(238, 76, 76));
-  display.fillArc(cx, cy, outerR, innerR, 216, 252, btcOrange());
-  display.fillArc(cx, cy, outerR, innerR, 252, 288, rgb(220, 220, 150));
-  display.fillArc(cx, cy, outerR, innerR, 288, 324, rgb(64, 210, 140));
-  display.fillArc(cx, cy, outerR, innerR, 324, 360, rgb(45, 220, 190));
+  display.fillArc(cx, cy, outerR, innerR, 180, 240, rgb(238, 76, 76));
+  display.fillArc(cx, cy, outerR, innerR, 240, 300, btcOrange());
+  display.fillArc(cx, cy, outerR, innerR, 300, 360, rgb(45, 220, 140));
 
   float angle = 180.0f + constrain(fearGreedValue, 0, 100) * 180.0f / 100.0f;
   float rad = angle * PI / 180.0f;

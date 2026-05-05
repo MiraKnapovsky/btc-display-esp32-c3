@@ -3,14 +3,14 @@
   <circle cx="120" cy="120" r="118" fill="#08090a"/>
   <circle cx="120" cy="120" r="116" fill="none" stroke="#603d12" stroke-width="2"/>
   <text x="120" y="42" fill="#968c7c" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">1/3</text>
-  <text x="204" y="42" fill="#f7931a" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">18:42</text>
+  <text x="176" y="42" fill="#f7931a" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">18:42</text>
   <text x="120" y="65" fill="#39d98a" font-family="Arial, sans-serif" font-size="18" font-weight="700" text-anchor="middle">WiFi OK</text>
   <rect x="56" y="102" width="128" height="42" rx="12" ry="12" fill="#f7931a"/>
   <text x="120" y="128" fill="#08090a" font-family="Arial, sans-serif" font-size="17" font-weight="700" text-anchor="middle">REFRESH</text>
-  <text x="42" y="164" fill="#968c7c" font-family="Arial, sans-serif" font-size="11">price</text>
-  <text x="206" y="164" fill="#39d98a" font-family="Arial, sans-serif" font-size="11" text-anchor="end">2 min</text>
-  <text x="42" y="184" fill="#968c7c" font-family="Arial, sans-serif" font-size="11">charts</text>
-  <text x="206" y="184" fill="#5ba7ff" font-family="Arial, sans-serif" font-size="11" text-anchor="end">41 min</text>
-  <text x="42" y="204" fill="#968c7c" font-family="Arial, sans-serif" font-size="11">fees</text>
-  <text x="206" y="204" fill="#39d98a" font-family="Arial, sans-serif" font-size="11" text-anchor="end">5 min</text>
+  <text x="55" y="158" fill="#968c7c" font-family="Arial, sans-serif" font-size="11">price</text>
+  <text x="185" y="158" fill="#39d98a" font-family="Arial, sans-serif" font-size="11" text-anchor="end">2 min</text>
+  <text x="55" y="176" fill="#968c7c" font-family="Arial, sans-serif" font-size="11">charts</text>
+  <text x="185" y="176" fill="#5ba7ff" font-family="Arial, sans-serif" font-size="11" text-anchor="end">41 min</text>
+  <text x="55" y="194" fill="#968c7c" font-family="Arial, sans-serif" font-size="11">fees</text>
+  <text x="185" y="194" fill="#39d98a" font-family="Arial, sans-serif" font-size="11" text-anchor="end">5 min</text>
 </svg>

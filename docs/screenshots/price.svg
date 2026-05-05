@@ -8,8 +8,8 @@
   <text x="120" y="128" fill="#fafaf4" font-family="Arial, sans-serif" font-size="31" font-weight="700" text-anchor="middle">$81,709</text>
   <rect x="52" y="146" rx="13" ry="13" width="136" height="26" fill="#10371f"/>
   <text x="120" y="164" fill="#39d98a" font-family="Arial, sans-serif" font-size="15" font-weight="700" text-anchor="middle">+1.98%</text>
-  <text x="70" y="195" fill="#968c7c" font-family="Arial, sans-serif" font-size="10" text-anchor="middle">LOW</text>
-  <text x="70" y="211" fill="#fafaf4" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">$79.9k</text>
-  <text x="170" y="195" fill="#968c7c" font-family="Arial, sans-serif" font-size="10" text-anchor="middle">HIGH</text>
-  <text x="170" y="211" fill="#fafaf4" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">$82.0k</text>
+  <text x="82" y="192" fill="#968c7c" font-family="Arial, sans-serif" font-size="10" text-anchor="middle">LOW</text>
+  <text x="82" y="207" fill="#fafaf4" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">$79.9k</text>
+  <text x="158" y="192" fill="#968c7c" font-family="Arial, sans-serif" font-size="10" text-anchor="middle">HIGH</text>
+  <text x="158" y="207" fill="#fafaf4" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">$82.0k</text>
 </svg>

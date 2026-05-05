@@ -8,9 +8,9 @@
   <text x="120" y="93" fill="#fafaf4" font-family="Arial, sans-serif" font-size="23" font-weight="700" text-anchor="middle">#948,070</text>
   <text x="120" y="118" fill="#968c7c" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">until halving</text>
   <text x="120" y="146" fill="#f7931a" font-family="Arial, sans-serif" font-size="26" font-weight="700" text-anchor="middle">101,930</text>
-  <text x="120" y="165" fill="#fafaf4" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">blocks  ~1.9 years</text>
+  <text x="120" y="165" fill="#fafaf4" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">~1.9 years</text>
   <rect x="43" y="178" rx="5" ry="5" width="154" height="10" fill="#1c160e" stroke="#5c3c16"/>
   <rect x="44" y="179" rx="4" ry="4" width="78" height="8" fill="#f7931a"/>
   <text x="120" y="201" fill="#968c7c" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">51% epoch</text>
-  <text x="120" y="214" fill="#f7931a" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">18:42</text>
+  <text x="120" y="216" fill="#f7931a" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">18:42</text>
 </svg>
