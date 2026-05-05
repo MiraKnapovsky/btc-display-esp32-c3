@@ -36,7 +36,7 @@ Known hardware from this build:
 - Fear & Greed index
 - Current Bitcoin block height and halving countdown
 - Mempool fee panel
-- Prague time
+- Configurable display time by UTC offset
 - Cached last data in flash, so the display can show old data after restart or without internet
 - Freshness indicator after data becomes older than 10 minutes
 - Wi-Fi/status menu
@@ -44,6 +44,26 @@ Known hardware from this build:
 - Network backoff to avoid freezing the UI when internet is down
 
 ## Wi-Fi setup
+
+The display can be configured in two ways.
+
+### Setup hotspot
+
+If the display cannot connect to Wi-Fi, open the system menu on the display and tap `HOTSPOT` to start the setup hotspot:
+
+- SSID: `BTC-Display-Setup`
+- Password: `btcwifi123`
+- Browser address: `http://192.168.4.1`
+
+Open the page from a notebook or phone, scan nearby networks, then save the SSID and password. The saved network is stored in the ESP32 flash and takes priority over the compile-time credentials.
+
+When the setup hotspot is active, the display shows the hotspot SSID, password and `192.168.4.1` address directly on the screen. Tap `OFFLINE MODE` on the display to hide the hotspot and keep using cached/offline screens. In the status menu, tap `HOTSPOT` to start the setup hotspot again.
+
+The same setup page also lets you choose the display time offset from `UTC -12:00` to `UTC +14:00`.
+
+![Wi-Fi setup page](docs/screenshots/web-setup.png)
+
+### Compile-time fallback
 
 The real Wi-Fi credentials are intentionally not committed.
 

@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <LovyanGFX.hpp>
 #include <Preferences.h>
+#include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <Wire.h>
@@ -24,9 +25,11 @@ constexpr const char* BLOCK_HEIGHT_URL =
     "https://mempool.space/api/blocks/tip/height";
 constexpr const char* FEES_URL =
     "https://mempool.space/api/v1/fees/recommended";
-constexpr const char* TIMEZONE_TZ = "CET-1CEST,M3.5.0/2,M10.5.0/3";
 constexpr const char* NTP_SERVER_1 = "pool.ntp.org";
 constexpr const char* NTP_SERVER_2 = "time.google.com";
+constexpr const char* SETUP_AP_SSID = "BTC-Display-Setup";
+constexpr const char* SETUP_AP_PASSWORD = "btcwifi123";
+constexpr int16_t DEFAULT_FIXED_UTC_OFFSET_MINUTES = 60;
 
 constexpr int SCREEN_W = 240;
 constexpr int SCREEN_H = 240;
@@ -46,6 +49,8 @@ constexpr uint32_t BLOCK_REFRESH_MS = 2UL * 60UL * 1000UL;
 constexpr uint32_t FEES_REFRESH_MS = 2UL * 60UL * 1000UL;
 constexpr uint32_t WIFI_RETRY_MS = 10000;
 constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 7000;
+constexpr uint32_t WIFI_SCAN_MS_PER_CHANNEL = 650;
+constexpr uint8_t WIFI_SCAN_MAX_RESULTS = 24;
 constexpr uint32_t HTTP_TIMEOUT_MS = 6000;
 constexpr uint32_t NETWORK_REQUEST_SPACING_MS = 1500;
 constexpr uint32_t NETWORK_FAILURE_BACKOFF_MS = 30000;
@@ -73,6 +78,12 @@ enum class Screen : uint8_t {
   Halving = 5,
   Fees = 6,
   Status = 7,
+};
+
+enum class ClockZoneMode : uint8_t {
+  Prague = 0,
+  UTC = 1,
+  FixedOffset = 2,
 };
 
 class LGFX : public lgfx::LGFX_Device {
@@ -138,6 +149,7 @@ class LGFX : public lgfx::LGFX_Device {
 LGFX display;
 WiFiClientSecure secureClient;
 Preferences cachePrefs;
+WebServer setupServer(80);
 
 Screen currentScreen = Screen::Price;
 Screen statusReturnScreen = Screen::Price;
@@ -146,6 +158,12 @@ String lastPrice = "";
 String lastStatus = "";
 String lastWifiStatus = "WiFi unknown";
 uint32_t nextWifiAttemptMs = 0;
+String provisionedWifiSsid = "";
+String provisionedWifiPassword = "";
+bool configPortalActive = false;
+bool configPortalRoutesReady = false;
+bool wifiSetupOfflineMode = false;
+uint32_t wifiDisconnectedSinceMs = 0;
 uint32_t lastPriceFetchedAt = 0;
 uint32_t lastPriceFetchedEpoch = 0;
 uint32_t lastPriceCacheSavedAt = 0;
@@ -222,6 +240,8 @@ uint32_t ignoreTouchUntilMs = 0;
 bool clockConfigured = false;
 int lastClockMinute = -1;
 uint32_t nextClockCheckMs = 0;
+ClockZoneMode clockZoneMode = ClockZoneMode::Prague;
+int16_t fixedUtcOffsetMinutes = DEFAULT_FIXED_UTC_OFFSET_MINUTES;
 uint8_t statusPage = 0;
 bool manualRefreshBusy = false;
 uint8_t displayBrightness = 255;
@@ -233,6 +253,8 @@ uint32_t internetBackoffUntilMs = 0;
 
 void renderCurrentScreen(bool loading);
 void handleTouch();
+void handleConfigPortal();
+int32_t pragueUtcOffsetSeconds(time_t utcNow);
 
 uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
   return display.color565(r, g, b);
@@ -308,6 +330,377 @@ void initBoardPower() {
   Wire.setClock(400000);
 }
 
+void loadWifiSetting() {
+  provisionedWifiSsid = cachePrefs.getString("wifiSsid", "");
+  provisionedWifiPassword = cachePrefs.getString("wifiPass", "");
+  wifiSetupOfflineMode = cachePrefs.getBool("wifiOffline", false);
+  provisionedWifiSsid.trim();
+}
+
+int16_t clampUtcOffsetMinutes(int value) {
+  return static_cast<int16_t>(constrain(value, -720, 840));
+}
+
+ClockZoneMode parseClockZoneMode(const String& value) {
+  if (value == "utc") {
+    return ClockZoneMode::UTC;
+  }
+  if (value == "fixed") {
+    return ClockZoneMode::FixedOffset;
+  }
+  return ClockZoneMode::Prague;
+}
+
+String clockZoneValue() {
+  switch (clockZoneMode) {
+    case ClockZoneMode::UTC:
+      return "utc";
+    case ClockZoneMode::FixedOffset:
+      return "fixed";
+    case ClockZoneMode::Prague:
+    default:
+      return "prague";
+  }
+}
+
+String selectedAttr(bool selected) {
+  return selected ? String(" selected") : String("");
+}
+
+String formatUtcOffsetMinutes(int16_t minutes) {
+  char buffer[8] = {};
+  int total = abs(static_cast<int>(minutes));
+  snprintf(buffer, sizeof(buffer), "%c%02d:%02d", minutes < 0 ? '-' : '+',
+           total / 60, total % 60);
+  return String(buffer);
+}
+
+String clockZoneLabel() {
+  switch (clockZoneMode) {
+    case ClockZoneMode::UTC:
+      return "UTC";
+    case ClockZoneMode::FixedOffset:
+      return String("UTC ") + formatUtcOffsetMinutes(fixedUtcOffsetMinutes);
+    case ClockZoneMode::Prague:
+    default:
+      return "Prague CET/CEST";
+  }
+}
+
+int16_t setupUtcOffsetMinutes() {
+  if (clockZoneMode == ClockZoneMode::UTC) {
+    return 0;
+  }
+  if (clockZoneMode == ClockZoneMode::FixedOffset) {
+    return fixedUtcOffsetMinutes;
+  }
+  time_t now = time(nullptr);
+  if (now >= 1700000000) {
+    return static_cast<int16_t>(pragueUtcOffsetSeconds(now) / 60);
+  }
+  return DEFAULT_FIXED_UTC_OFFSET_MINUTES;
+}
+
+void loadClockSetting() {
+  clockZoneMode =
+      static_cast<ClockZoneMode>(cachePrefs.getUChar("clockZone", 0));
+  if (clockZoneMode != ClockZoneMode::Prague &&
+      clockZoneMode != ClockZoneMode::UTC &&
+      clockZoneMode != ClockZoneMode::FixedOffset) {
+    clockZoneMode = ClockZoneMode::Prague;
+  }
+  fixedUtcOffsetMinutes = clampUtcOffsetMinutes(
+      cachePrefs.getInt("utcOffset", DEFAULT_FIXED_UTC_OFFSET_MINUTES));
+}
+
+void saveClockSetting(ClockZoneMode mode, int16_t offsetMinutes) {
+  clockZoneMode = mode;
+  fixedUtcOffsetMinutes = clampUtcOffsetMinutes(offsetMinutes);
+  cachePrefs.putUChar("clockZone", static_cast<uint8_t>(clockZoneMode));
+  cachePrefs.putInt("utcOffset", fixedUtcOffsetMinutes);
+  lastClockMinute = -1;
+  nextClockCheckMs = 0;
+}
+
+String activeWifiSsid() {
+  return provisionedWifiSsid.length() ? provisionedWifiSsid : String(WIFI_SSID);
+}
+
+String activeWifiPassword() {
+  return provisionedWifiSsid.length() ? provisionedWifiPassword
+                                      : String(WIFI_PASSWORD);
+}
+
+bool hasConfiguredWifi() {
+  String ssid = activeWifiSsid();
+  ssid.trim();
+  return ssid.length() > 0 && ssid != "YOUR_WIFI_SSID";
+}
+
+void saveWifiOfflineMode(bool enabled) {
+  if (wifiSetupOfflineMode == enabled) {
+    return;
+  }
+  wifiSetupOfflineMode = enabled;
+  cachePrefs.putBool("wifiOffline", wifiSetupOfflineMode);
+}
+
+bool hotspotButtonHit(uint16_t x, uint16_t y) {
+  return x >= 46 && x <= 194 && y >= 192 && y <= 224;
+}
+
+String htmlEscape(const String& input) {
+  String out;
+  out.reserve(input.length() + 8);
+  for (size_t i = 0; i < input.length(); ++i) {
+    char c = input[i];
+    if (c == '&') {
+      out += "&amp;";
+    } else if (c == '<') {
+      out += "&lt;";
+    } else if (c == '>') {
+      out += "&gt;";
+    } else if (c == '"') {
+      out += "&quot;";
+    } else if (c == '\'') {
+      out += "&#39;";
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+int16_t scanSetupNetworks() {
+  WiFi.scanDelete();
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  WiFi.disconnect(false, false);
+  delay(120);
+
+  int16_t count =
+      WiFi.scanNetworks(false, true, false, WIFI_SCAN_MS_PER_CHANNEL, 0);
+  if (count < 0) {
+    WiFi.scanDelete();
+    delay(120);
+    count = WiFi.scanNetworks(false, true, true, WIFI_SCAN_MS_PER_CHANNEL, 0);
+  }
+  return count;
+}
+
+String wifiSetupPage(const String& message = "", bool scanNetworks = true) {
+  String page;
+  page.reserve(9000);
+  page += F("<!doctype html><html><head><meta charset='utf-8'>");
+  page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
+  page += F("<title>BTC Display Setup</title><style>");
+  page += F("body{margin:0;background:#08090a;color:#fafaf4;font:16px Arial,sans-serif}");
+  page += F("main{max-width:620px;margin:0 auto;padding:18px}");
+  page += F("h1{color:#f7931a;font-size:26px;margin:0 0 14px}");
+  page += F("h2{font-size:18px;margin:0 0 12px}label{display:block;margin:14px 0 6px}");
+  page += F("input,select,button{box-sizing:border-box;width:100%;font:16px Arial,sans-serif;border-radius:8px}");
+  page += F("input,select{padding:12px;background:#141719;color:#fafaf4;border:1px solid #5c3c16}");
+  page += F("button,a.btn{display:block;text-align:center;margin-top:14px;padding:12px;border:0;background:#f7931a;color:#08090a;font-weight:700;text-decoration:none;border-radius:8px}");
+  page += F(".card{background:#111315;border:1px solid #3c2a14;border-radius:8px;padding:16px;margin-top:16px}");
+  page += F(".msg{border-color:#f7931a;color:#f7931a}.muted{color:#968c7c;font-size:14px;line-height:1.35}");
+  page += F(".net{display:flex;gap:10px;align-items:center;margin:8px 0;padding:10px;border:1px solid #2d2418;border-radius:8px;background:#151719}");
+  page += F(".net input{width:auto}.net span{flex:1;overflow:hidden;text-overflow:ellipsis}.net small{color:#968c7c;white-space:nowrap}");
+  page += F("</style></head><body><main><h1>BTC Display Setup</h1>");
+  if (message.length()) {
+    page += F("<div class='card msg'>");
+    page += htmlEscape(message);
+    page += F("</div>");
+  }
+  page += F("<form class='card' method='post' action='/time'><h2>Time</h2>");
+  page += F("<label for='utcOffset'>UTC offset</label>");
+  page += F("<select id='utcOffset' name='offset'>");
+  int16_t selectedOffset = setupUtcOffsetMinutes();
+  for (int offset = -720; offset <= 840; offset += 15) {
+    page += F("<option value='");
+    page += String(offset);
+    page += F("'");
+    page += selectedAttr(offset == selectedOffset);
+    page += F(">UTC ");
+    page += formatUtcOffsetMinutes(static_cast<int16_t>(offset));
+    page += F("</option>");
+  }
+  page += F("</select>");
+  page += F("<button type='submit'>Save time</button></form>");
+  page += F("<form class='card' method='post' action='/save'><h2>WiFi</h2>");
+
+  if (scanNetworks) {
+    int16_t networkCount = scanSetupNetworks();
+    if (networkCount > 0) {
+      page += F("<div class='muted'>Nearby networks</div>");
+      uint8_t shown = 0;
+      for (int i = 0; i < networkCount && shown < WIFI_SCAN_MAX_RESULTS; ++i) {
+        String ssid = WiFi.SSID(i);
+        if (!ssid.length()) {
+          continue;
+        }
+        page += F("<label class='net'><input type='radio' name='ssidPick' value='");
+        page += htmlEscape(ssid);
+        page += F("' onclick='document.getElementById(\"ssid\").value=this.value'");
+        if (ssid == activeWifiSsid()) {
+          page += F(" checked");
+        }
+        page += F("><span>");
+        page += htmlEscape(ssid);
+        page += F("</span><small>");
+        page += String(WiFi.RSSI(i));
+        page += WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? F(" dBm open")
+                                                         : F(" dBm locked");
+        page += F("</small></label>");
+        shown++;
+      }
+      if (shown == 0) {
+        page += F("<div class='muted'>Only hidden networks found.</div>");
+      }
+    } else if (networkCount == 0) {
+      page += F("<div class='muted'>No networks found. Try Scan again.</div>");
+    } else {
+      page += F("<div class='muted'>Scan failed. Try Scan again.</div>");
+    }
+    WiFi.scanDelete();
+  }
+
+  page += F("<label for='ssid'>Network name</label>");
+  page += F("<input id='ssid' name='ssid' required maxlength='32' value='");
+  page += htmlEscape(activeWifiSsid());
+  page += F("'>");
+  page += F("<label for='pass'>Password</label>");
+  page += F("<input id='pass' name='pass' type='password' maxlength='64' autocomplete='current-password'>");
+  page += F("<button type='submit'>Save WiFi</button></form>");
+  page += F("<a class='btn' href='/'>Scan again</a>");
+  page += F("</main></body></html>");
+  return page;
+}
+
+void handleSetupRoot() {
+  setupServer.send(200, "text/html", wifiSetupPage());
+}
+
+void handleSetupSave() {
+  String ssid = setupServer.arg("ssid");
+  String pass = setupServer.arg("pass");
+  ssid.trim();
+  if (!ssid.length()) {
+    setupServer.send(400, "text/html", wifiSetupPage("SSID is required."));
+    return;
+  }
+
+  provisionedWifiSsid = ssid;
+  provisionedWifiPassword = pass;
+  cachePrefs.putString("wifiSsid", provisionedWifiSsid);
+  cachePrefs.putString("wifiPass", provisionedWifiPassword);
+
+  nextWifiAttemptMs = 0;
+  nextNetworkRequestAllowedMs = 0;
+  internetBackoffUntilMs = 0;
+  saveWifiOfflineMode(false);
+  lastWifiStatus = "WiFi saved";
+  WiFi.disconnect(false);
+  setupServer.send(200, "text/html",
+                   wifiSetupPage("Saved. The display is trying to connect.",
+                                 false));
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(provisionedWifiSsid.c_str(), provisionedWifiPassword.c_str());
+  lastWifiStatus = "WiFi connecting";
+  renderCurrentScreen(false);
+}
+
+void handleSetupTimeSave() {
+  int16_t offsetMinutes = setupUtcOffsetMinutes();
+  if (setupServer.hasArg("offset")) {
+    offsetMinutes = clampUtcOffsetMinutes(setupServer.arg("offset").toInt());
+  }
+
+  saveClockSetting(ClockZoneMode::FixedOffset, offsetMinutes);
+  setupServer.send(200, "text/html",
+                   wifiSetupPage("Time setting saved.", false));
+  renderCurrentScreen(false);
+}
+
+void setupConfigPortalRoutes() {
+  if (configPortalRoutesReady) {
+    return;
+  }
+  setupServer.on("/", HTTP_GET, handleSetupRoot);
+  setupServer.on("/save", HTTP_POST, handleSetupSave);
+  setupServer.on("/time", HTTP_POST, handleSetupTimeSave);
+  setupServer.onNotFound(handleSetupRoot);
+  configPortalRoutesReady = true;
+}
+
+void startConfigPortal() {
+  if (configPortalActive) {
+    return;
+  }
+  saveWifiOfflineMode(false);
+  setupConfigPortalRoutes();
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  bool ok = WiFi.softAP(SETUP_AP_SSID, SETUP_AP_PASSWORD);
+  setupServer.begin();
+  configPortalActive = true;
+  lastWifiStatus = ok ? "Setup AP " + WiFi.softAPIP().toString()
+                      : "Setup AP failed";
+  Serial.println(lastWifiStatus);
+  renderCurrentScreen(false);
+}
+
+void stopConfigPortal() {
+  if (!configPortalActive) {
+    return;
+  }
+  setupServer.stop();
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_STA);
+  configPortalActive = false;
+  Serial.println("Setup AP stopped");
+  renderCurrentScreen(false);
+}
+
+void enterWifiOfflineMode() {
+  saveWifiOfflineMode(true);
+  if (configPortalActive) {
+    stopConfigPortal();
+  }
+  lastWifiStatus = "Offline mode";
+  Serial.println("WiFi setup offline mode");
+  renderCurrentScreen(false);
+}
+
+void requestConfigPortal() {
+  saveWifiOfflineMode(false);
+  wifiDisconnectedSinceMs = millis();
+  nextWifiAttemptMs = 0;
+  internetBackoffUntilMs = 0;
+  startConfigPortal();
+}
+
+void handleConfigPortal() {
+  if (configPortalActive) {
+    setupServer.handleClient();
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiDisconnectedSinceMs = 0;
+    if (wifiSetupOfflineMode) {
+      saveWifiOfflineMode(false);
+    }
+    if (configPortalActive) {
+      stopConfigPortal();
+    }
+    return;
+  }
+
+  if (wifiDisconnectedSinceMs == 0) {
+    wifiDisconnectedSinceMs = millis();
+  }
+}
+
 void drawCenteredText(const String& text, int y, int font, uint16_t color) {
   display.setFont(nullptr);
   display.setTextDatum(middle_center);
@@ -326,13 +719,86 @@ void configureClockIfNeeded() {
   if (clockConfigured || WiFi.status() != WL_CONNECTED) {
     return;
   }
-  configTzTime(TIMEZONE_TZ, NTP_SERVER_1, NTP_SERVER_2);
+  configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
   clockConfigured = true;
+}
+
+bool isLeapYear(int year) {
+  return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+int daysInMonth(int year, int month) {
+  static const uint8_t days[] = {31, 28, 31, 30, 31, 30,
+                                 31, 31, 30, 31, 30, 31};
+  if (month == 2 && isLeapYear(year)) {
+    return 29;
+  }
+  return days[month - 1];
+}
+
+int64_t daysBeforeYear(int year) {
+  int64_t days = 0;
+  for (int y = 1970; y < year; ++y) {
+    days += isLeapYear(y) ? 366 : 365;
+  }
+  return days;
+}
+
+int64_t utcEpoch(int year, int month, int day, int hour) {
+  int64_t days = daysBeforeYear(year);
+  for (int m = 1; m < month; ++m) {
+    days += daysInMonth(year, m);
+  }
+  days += day - 1;
+  return days * 86400LL + hour * 3600LL;
+}
+
+int dayOfWeekUtc(int year, int month, int day) {
+  int64_t days = daysBeforeYear(year);
+  for (int m = 1; m < month; ++m) {
+    days += daysInMonth(year, m);
+  }
+  days += day - 1;
+  return static_cast<int>((days + 4) % 7);  // Sunday=0, 1970-01-01=Thursday.
+}
+
+int lastSundayOfMonth(int year, int month) {
+  int lastDay = daysInMonth(year, month);
+  return lastDay - dayOfWeekUtc(year, month, lastDay);
+}
+
+int32_t pragueUtcOffsetSeconds(time_t utcNow) {
+  tm utcInfo = {};
+  gmtime_r(&utcNow, &utcInfo);
+  int year = utcInfo.tm_year + 1900;
+  int dstStartDay = lastSundayOfMonth(year, 3);
+  int dstEndDay = lastSundayOfMonth(year, 10);
+  int64_t dstStart = utcEpoch(year, 3, dstStartDay, 1);
+  int64_t dstEnd = utcEpoch(year, 10, dstEndDay, 1);
+  int64_t now = static_cast<int64_t>(utcNow);
+  return (now >= dstStart && now < dstEnd) ? 7200 : 3600;
+}
+
+int32_t displayUtcOffsetSeconds(time_t utcNow) {
+  switch (clockZoneMode) {
+    case ClockZoneMode::UTC:
+      return 0;
+    case ClockZoneMode::FixedOffset:
+      return static_cast<int32_t>(fixedUtcOffsetMinutes) * 60L;
+    case ClockZoneMode::Prague:
+    default:
+      return pragueUtcOffsetSeconds(utcNow);
+  }
 }
 
 bool readLocalTime(tm& info) {
   configureClockIfNeeded();
-  return getLocalTime(&info, 20);
+  time_t now = time(nullptr);
+  if (now < 1700000000) {
+    return false;
+  }
+  time_t displayNow = now + displayUtcOffsetSeconds(now);
+  return gmtime_r(&displayNow, &info) != nullptr;
 }
 
 String clockText() {
@@ -630,6 +1096,27 @@ void drawRefreshButton(int y) {
   display.setTextColor(color, rgb(16, 18, 18));
   display.drawString(manualRefreshBusy ? "UPDATING" : "REFRESH", SCREEN_W / 2,
                      y + 13, 2);
+}
+
+void drawStatusActionButton(int y) {
+  bool wifiOk = WiFi.status() == WL_CONNECTED;
+  const char* label = "REFRESH";
+  uint16_t color = manualRefreshBusy ? rgb(75, 160, 255) : btcOrange();
+  if (!wifiOk && configPortalActive) {
+    label = "OFFLINE";
+    color = rgb(75, 160, 255);
+  } else if (!wifiOk) {
+    label = "HOTSPOT";
+    color = btcOrange();
+  } else if (manualRefreshBusy) {
+    label = "UPDATING";
+  }
+
+  display.fillRoundRect(62, y, 116, 26, 8, rgb(16, 18, 18));
+  display.drawRoundRect(62, y, 116, 26, 8, color);
+  display.setTextDatum(middle_center);
+  display.setTextColor(color, rgb(16, 18, 18));
+  display.drawString(label, SCREEN_W / 2, y + 13, 2);
 }
 
 void drawBrightnessStatusPage() {
@@ -939,6 +1426,38 @@ void drawFeesScreen(bool loading = false) {
   drawPageDots();
 }
 
+bool shouldShowConfigPortalScreen() {
+  return configPortalActive && WiFi.status() != WL_CONNECTED;
+}
+
+void drawConfigPortalScreen() {
+  drawBase();
+  drawCenteredText("WiFi hotspot ON", 32, 2, btcOrange());
+  display.setTextDatum(middle_center);
+  display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+  display.drawString("connect from notebook or phone", SCREEN_W / 2, 54, 1);
+
+  display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+  display.drawString("SSID", SCREEN_W / 2, 78, 1);
+  display.setTextColor(rgb(250, 250, 244), TFT_BLACK);
+  display.drawString(SETUP_AP_SSID, SCREEN_W / 2, 98, 2);
+
+  display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+  display.drawString("PASSWORD", SCREEN_W / 2, 122, 1);
+  display.setTextColor(rgb(250, 250, 244), TFT_BLACK);
+  display.drawString(SETUP_AP_PASSWORD, SCREEN_W / 2, 142, 2);
+
+  display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+  display.drawString("OPEN", SCREEN_W / 2, 166, 1);
+  display.setTextColor(btcOrange(), TFT_BLACK);
+  display.drawString("192.168.4.1", SCREEN_W / 2, 184, 2);
+
+  display.fillRoundRect(46, 196, 148, 28, 8, rgb(16, 18, 18));
+  display.drawRoundRect(46, 196, 148, 28, 8, rgb(75, 160, 255));
+  display.setTextColor(rgb(75, 160, 255), rgb(16, 18, 18));
+  display.drawString("OFFLINE MODE", SCREEN_W / 2, 210, 2);
+}
+
 void drawStatusScreen() {
   drawBase();
   drawCenteredText("System", 24, 2, btcOrange());
@@ -946,31 +1465,44 @@ void drawStatusScreen() {
   display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
   display.drawString(String(statusPage + 1) + "/" + String(STATUS_PAGE_COUNT),
                      SCREEN_W / 2, 39, 1);
-  display.setTextDatum(middle_right);
-  display.setTextColor(btcOrange(), TFT_BLACK);
-  display.drawString(clockText(), 204, 39, 1);
 
   bool wifiOk = WiFi.status() == WL_CONNECTED;
   uint16_t wifiColor = wifiOk ? rgb(45, 220, 120) : rgb(238, 76, 76);
   if (statusPage < 2) {
+    String wifiLabel = "WiFi OFF";
+    if (wifiOk) {
+      wifiLabel = "WiFi OK";
+    } else if (configPortalActive) {
+      wifiLabel = "HOTSPOT";
+      wifiColor = btcOrange();
+    } else if (wifiSetupOfflineMode) {
+      wifiLabel = "OFFLINE";
+      wifiColor = rgb(75, 160, 255);
+    }
     display.fillRoundRect(54, 50, 132, 24, 8, rgb(16, 18, 18));
     display.drawRoundRect(54, 50, 132, 24, 8, wifiColor);
     display.setTextDatum(middle_center);
     display.setTextColor(wifiColor, rgb(16, 18, 18));
-    display.drawString(wifiOk ? "WiFi OK" : "WiFi OFF", SCREEN_W / 2, 62, 2);
+    display.drawString(wifiLabel, SCREEN_W / 2, 62, 2);
   }
 
   if (statusPage == 0) {
     if (wifiOk) {
       drawStatusRow(84, "RSSI", String(WiFi.RSSI()) + " dBm", wifiColor);
       drawStatusRow(100, "IP", WiFi.localIP().toString(), rgb(250, 250, 244));
+    } else if (configPortalActive) {
+      drawStatusRow(84, "Setup AP", SETUP_AP_SSID, btcOrange());
+      drawStatusRow(100, "Open", WiFi.softAPIP().toString(), btcOrange());
+    } else if (wifiSetupOfflineMode) {
+      drawStatusRow(84, "Status", "Offline mode", rgb(75, 160, 255));
+      drawStatusRow(100, "Setup", "tap HOTSPOT", btcOrange());
     } else {
       drawStatusRow(84, "Status", lastWifiStatus, wifiColor);
       drawStatusRow(100, "Retry", "10s", btcOrange());
     }
 
     display.setTextDatum(middle_center);
-    drawRefreshButton(110);
+    drawStatusActionButton(110);
     drawStatusAgeRow(140, "BTC", lastPriceFetchedAt, lastPriceFetchedEpoch);
     drawStatusAgeRow(156, "F&G", fearGreedFetchedAt, fearGreedFetchedEpoch);
     drawStatusAgeRow(172, "BLK", blockFetchedAt, blockFetchedEpoch);
@@ -982,7 +1514,7 @@ void drawStatusScreen() {
                      CHART30_REFRESH_MS / 1000UL);
     drawStatusAgeRow(110, "1Y", chart365FetchedAt, chart365FetchedEpoch,
                      CHART365_REFRESH_MS / 1000UL);
-    drawStatusRow(130, "SSID", String(WIFI_SSID), rgb(250, 250, 244));
+    drawStatusRow(130, "SSID", activeWifiSsid(), rgb(250, 250, 244));
     drawStatusRow(148, "Price", lastPrice.length() ? lastPrice : "--",
                   rgb(250, 250, 244));
     drawStatusRow(166, "Block",
@@ -997,6 +1529,11 @@ void drawStatusScreen() {
 }
 
 void renderCurrentScreen(bool loading = false) {
+  if (shouldShowConfigPortalScreen()) {
+    drawConfigPortalScreen();
+    return;
+  }
+
   switch (currentScreen) {
     case Screen::Price:
       drawPriceScreen(lastPrice, lastStatus, loading);
@@ -1369,6 +1906,7 @@ const char* wifiStatusName(wl_status_t status) {
 }
 
 bool ensureWifi(String& status) {
+  handleConfigPortal();
   if (WiFi.status() == WL_CONNECTED) {
     configureClockIfNeeded();
     status = "WiFi OK";
@@ -1383,14 +1921,23 @@ bool ensureWifi(String& status) {
   }
   nextWifiAttemptMs = millis() + WIFI_RETRY_MS;
 
-  WiFi.mode(WIFI_STA);
+  if (!hasConfiguredWifi()) {
+    status = "WiFi not set";
+    lastWifiStatus = status;
+    return false;
+  }
+
+  WiFi.mode(configPortalActive ? WIFI_AP_STA : WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  String ssid = activeWifiSsid();
+  String password = activeWifiPassword();
+  WiFi.begin(ssid.c_str(), password.c_str());
 
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED &&
          millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
     handleTouch();
+    handleConfigPortal();
     delay(50);
   }
 
@@ -2103,7 +2650,13 @@ bool handleStatusControlTap(uint16_t x, uint16_t y) {
     return true;
   }
   if (statusPage == 0 && x >= 56 && x <= 184 && y >= 102 && y <= 144) {
-    requestManualRefresh();
+    if (WiFi.status() == WL_CONNECTED) {
+      requestManualRefresh();
+    } else if (configPortalActive) {
+      enterWifiOfflineMode();
+    } else {
+      requestConfigPortal();
+    }
     return true;
   }
   return false;
@@ -2117,6 +2670,13 @@ bool handleStatusTap(uint16_t x, uint16_t y) {
 }
 
 bool handleTap(uint16_t x, uint16_t y) {
+  if (shouldShowConfigPortalScreen()) {
+    if (hotspotButtonHit(x, y)) {
+      enterWifiOfflineMode();
+    }
+    return true;
+  }
+
   if (currentScreen == Screen::Status && handleStatusControlTap(x, y)) {
     return true;
   }
@@ -2307,6 +2867,8 @@ void setup() {
 
   initBoardPower();
   cachePrefs.begin("btcdisp", false);
+  loadWifiSetting();
+  loadClockSetting();
   loadBrightnessSetting();
   display.init();
   display.initDMA();
@@ -2340,6 +2902,7 @@ void setup() {
 
 void loop() {
   handleTouch();
+  handleConfigPortal();
   if (Serial.available()) {
     char c = Serial.read();
     if (c == 'n' || c == 'N') {
