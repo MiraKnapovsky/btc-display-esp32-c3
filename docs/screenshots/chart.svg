@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="BTC chart screen">
+  <rect width="240" height="240" fill="#050607"/>
+  <circle cx="120" cy="120" r="118" fill="#08090a"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#603d12" stroke-width="2"/>
+  <text x="120" y="42" fill="#fafaf4" font-family="Arial, sans-serif" font-size="15" font-weight="700" text-anchor="middle">BTC/USD 30D</text>
+  <line x1="38" y1="72" x2="38" y2="158" stroke="#2a2f2d" stroke-width="1"/>
+  <line x1="38" y1="158" x2="204" y2="158" stroke="#2a2f2d" stroke-width="1"/>
+  <path d="M40 144 L53 137 L66 140 L79 129 L92 132 L105 118 L118 121 L131 103 L144 109 L157 91 L170 87 L183 74 L202 66" fill="none" stroke="#f7931a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M40 144 L53 137 L66 140 L79 129 L92 132 L105 118 L118 121 L131 103 L144 109 L157 91 L170 87 L183 74 L202 66 L202 158 L40 158 Z" fill="#f7931a" opacity=".11"/>
+  <text x="120" y="183" fill="#fafaf4" font-family="Arial, sans-serif" font-size="22" font-weight="700" text-anchor="middle">$81,709</text>
+  <text x="120" y="203" fill="#39d98a" font-family="Arial, sans-serif" font-size="14" font-weight="700" text-anchor="middle">+$1,584</text>
+  <text x="120" y="222" fill="#f7931a" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">18:42</text>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="Halving screen">
+  <rect width="240" height="240" fill="#050607"/>
+  <circle cx="120" cy="120" r="118" fill="#08090a"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#603d12" stroke-width="2"/>
+  <text x="120" y="31" fill="#f7931a" font-family="Arial, sans-serif" font-size="16" font-weight="700" text-anchor="middle">Halving</text>
+  <text x="120" y="50" fill="#fafaf4" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">BTC $81,709</text>
+  <text x="120" y="68" fill="#968c7c" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">current block</text>
+  <text x="120" y="93" fill="#fafaf4" font-family="Arial, sans-serif" font-size="23" font-weight="700" text-anchor="middle">#948,070</text>
+  <text x="120" y="118" fill="#968c7c" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">until halving</text>
+  <text x="120" y="146" fill="#f7931a" font-family="Arial, sans-serif" font-size="26" font-weight="700" text-anchor="middle">101,930</text>
+  <text x="120" y="165" fill="#fafaf4" font-family="Arial, sans-serif" font-size="13" text-anchor="middle">blocks  ~1.9 years</text>
+  <rect x="43" y="178" rx="5" ry="5" width="154" height="10" fill="#1c160e" stroke="#5c3c16"/>
+  <rect x="44" y="179" rx="4" ry="4" width="78" height="8" fill="#f7931a"/>
+  <text x="120" y="201" fill="#968c7c" font-family="Arial, sans-serif" font-size="11" text-anchor="middle">51% epoch</text>
+  <text x="120" y="214" fill="#f7931a" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">18:42</text>
+</svg>

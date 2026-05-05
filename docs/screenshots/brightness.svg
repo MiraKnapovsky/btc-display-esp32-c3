@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" role="img" aria-label="Brightness screen">
+  <rect width="240" height="240" fill="#050607"/>
+  <circle cx="120" cy="120" r="118" fill="#08090a"/>
+  <circle cx="120" cy="120" r="116" fill="none" stroke="#603d12" stroke-width="2"/>
+  <text x="120" y="31" fill="#f7931a" font-family="Arial, sans-serif" font-size="16" font-weight="700" text-anchor="middle">System</text>
+  <text x="120" y="42" fill="#968c7c" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">3/3</text>
+  <text x="120" y="85" fill="#968c7c" font-family="Arial, sans-serif" font-size="12" text-anchor="middle">brightness</text>
+  <text x="120" y="127" fill="#fafaf4" font-family="Arial, sans-serif" font-size="42" font-weight="700" text-anchor="middle">70%</text>
+  <rect x="46" y="150" width="148" height="12" rx="6" fill="#1c160e" stroke="#5c3c16"/>
+  <rect x="47" y="151" width="102" height="10" rx="5" fill="#f7931a"/>
+  <rect x="42" y="184" width="58" height="34" rx="8" fill="#101212" stroke="#f7931a"/>
+  <text x="71" y="209" fill="#f7931a" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">-</text>
+  <rect x="140" y="184" width="58" height="34" rx="8" fill="#101212" stroke="#f7931a"/>
+  <text x="169" y="209" fill="#f7931a" font-family="Arial, sans-serif" font-size="28" font-weight="700" text-anchor="middle">+</text>
+</svg>
