@@ -39,7 +39,7 @@ Known hardware from this build:
 - Configurable display time by UTC offset
 - Cached last data in flash, so the display can show old data after restart or without internet
 - Freshness indicator after data becomes older than 10 minutes
-- Wi-Fi/status menu
+- Wi-Fi/status menu with connect, hotspot and offline controls
 - Brightness settings with tap and hold controls
 - Network backoff to avoid freezing the UI when internet is down
 
@@ -64,6 +64,15 @@ When the setup hotspot is active, the display shows the hotspot SSID, password a
 The same setup page also lets you choose the display time offset from `UTC -12:00` to `UTC +14:00`.
 
 ![Wi-Fi setup page](docs/screenshots/web-setup.png)
+
+### Display Wi-Fi controls
+
+Open the status menu from the left or right edge of the display. When Wi-Fi is not connected, tap the Wi-Fi status or `DETAILS` to open the Wi-Fi detail page.
+
+- `CONNECTING`: the display is trying to connect or waiting for the next retry.
+- `HOTSPOT`: starts the setup hotspot so Wi-Fi can be changed from a browser.
+- `OFFLINE`: stops Wi-Fi retry attempts and keeps showing cached data.
+- `CONNECT`: exits offline mode and tries the saved Wi-Fi again.
 
 ### Compile-time fallback
 

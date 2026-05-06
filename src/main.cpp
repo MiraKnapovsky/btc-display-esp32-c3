@@ -48,8 +48,9 @@ constexpr uint32_t FEAR_GREED_REFRESH_MS = 30UL * 60UL * 1000UL;
 constexpr uint32_t BLOCK_REFRESH_MS = 2UL * 60UL * 1000UL;
 constexpr uint32_t FEES_REFRESH_MS = 2UL * 60UL * 1000UL;
 constexpr uint32_t WIFI_RETRY_MS = 10000;
-constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 7000;
-constexpr uint32_t WIFI_PORTAL_CONNECT_TIMEOUT_MS = 30000;
+constexpr uint32_t WIFI_CONNECT_RETRY_MS = 30000;
+constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
+constexpr uint32_t WIFI_PORTAL_CONNECT_TIMEOUT_MS = 45000;
 constexpr uint32_t WIFI_PORTAL_CLOSE_DELAY_MS = 8000;
 constexpr uint32_t WIFI_SCAN_MS_PER_CHANNEL = 650;
 constexpr uint8_t WIFI_SCAN_MAX_RESULTS = 24;
@@ -65,7 +66,7 @@ constexpr uint8_t PAGE_COUNT = 7;
 constexpr uint16_t MENU_EDGE_W = 54;
 constexpr int HALVING_INTERVAL = 210000;
 constexpr uint32_t CACHE_VERSION = 2;
-constexpr uint8_t STATUS_PAGE_COUNT = 3;
+constexpr uint8_t STATUS_PAGE_COUNT = 4;
 constexpr uint8_t BRIGHTNESS_STEP_PCT = 10;
 constexpr uint8_t BRIGHTNESS_MIN_RAW = 20;
 constexpr uint32_t BRIGHTNESS_HOLD_FIRST_MS = 450;
@@ -171,6 +172,9 @@ uint32_t portalConnectStartedMs = 0;
 uint32_t portalConnectDoneMs = 0;
 String portalConnectSsid = "";
 String portalConnectError = "";
+bool wifiConnectAttemptActive = false;
+uint32_t wifiConnectAttemptStartedMs = 0;
+String wifiConnectAttemptSsid = "";
 uint32_t wifiDisconnectedSinceMs = 0;
 uint32_t lastPriceFetchedAt = 0;
 uint32_t lastPriceFetchedEpoch = 0;
@@ -263,6 +267,7 @@ void renderCurrentScreen(bool loading);
 void handleTouch();
 void handleConfigPortal();
 void configureClockIfNeeded();
+bool ensureWifi(String& status);
 int32_t pragueUtcOffsetSeconds(time_t utcNow);
 
 uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -444,6 +449,38 @@ bool hasConfiguredWifi() {
   String ssid = activeWifiSsid();
   ssid.trim();
   return ssid.length() > 0 && ssid != "YOUR_WIFI_SSID";
+}
+
+bool wifiConnecting() {
+  return wifiConnectAttemptActive || portalConnectPending;
+}
+
+bool wifiConnectPending() {
+  return hasConfiguredWifi() && !wifiSetupOfflineMode && !configPortalActive &&
+         WiFi.status() != WL_CONNECTED;
+}
+
+bool wifiConnectingOrPending() {
+  return wifiConnecting() || wifiConnectPending();
+}
+
+String wifiConnectingSsid() {
+  if (portalConnectPending && portalConnectSsid.length()) {
+    return portalConnectSsid;
+  }
+  if (wifiConnectAttemptSsid.length()) {
+    return wifiConnectAttemptSsid;
+  }
+  return activeWifiSsid();
+}
+
+uint32_t wifiConnectingElapsedSec() {
+  uint32_t start = portalConnectPending ? portalConnectStartedMs
+                                        : wifiConnectAttemptStartedMs;
+  if (start == 0 || millis() < start) {
+    return 0;
+  }
+  return (millis() - start) / 1000UL;
 }
 
 void saveWifiOfflineMode(bool enabled) {
@@ -778,6 +815,7 @@ void startConfigPortal() {
   portalConnectStartedMs = 0;
   portalConnectDoneMs = 0;
   portalConnectError = "";
+  wifiConnectAttemptActive = false;
   setupConfigPortalRoutes();
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleep(false);
@@ -799,6 +837,7 @@ void stopConfigPortal() {
   WiFi.mode(WIFI_STA);
   configPortalActive = false;
   portalConnectPending = false;
+  wifiConnectAttemptActive = false;
   Serial.println("Setup AP stopped");
   renderCurrentScreen(false);
 }
@@ -808,6 +847,9 @@ void enterWifiOfflineMode() {
   portalConnectPending = false;
   portalConnectSucceeded = false;
   portalConnectError = "";
+  wifiConnectAttemptActive = false;
+  nextWifiAttemptMs = 0;
+  WiFi.disconnect(false, false);
   if (configPortalActive) {
     stopConfigPortal();
   }
@@ -821,7 +863,29 @@ void requestConfigPortal() {
   wifiDisconnectedSinceMs = millis();
   nextWifiAttemptMs = 0;
   internetBackoffUntilMs = 0;
+  wifiConnectAttemptActive = false;
+  WiFi.disconnect(false, false);
   startConfigPortal();
+}
+
+void requestWifiReconnect() {
+  saveWifiOfflineMode(false);
+  portalConnectPending = false;
+  portalConnectSucceeded = false;
+  portalConnectError = "";
+  wifiConnectAttemptActive = false;
+  wifiDisconnectedSinceMs = millis();
+  nextWifiAttemptMs = 0;
+  nextNetworkRequestAllowedMs = 0;
+  internetBackoffUntilMs = 0;
+  lastWifiStatus = "WiFi connecting";
+  if (currentScreen == Screen::Status) {
+    statusPage = STATUS_PAGE_COUNT - 1;
+  }
+  renderCurrentScreen(false);
+  String reconnectStatus;
+  ensureWifi(reconnectStatus);
+  renderCurrentScreen(false);
 }
 
 void handleConfigPortal() {
@@ -875,6 +939,16 @@ void drawCenteredText(const String& text, int y, int font, uint16_t color) {
   display.setTextDatum(middle_center);
   display.setTextColor(color, TFT_BLACK);
   display.drawString(text, SCREEN_W / 2, y, font);
+}
+
+String compactDisplayText(const String& text, size_t maxChars) {
+  if (text.length() <= maxChars) {
+    return text;
+  }
+  if (maxChars <= 3) {
+    return text.substring(0, maxChars);
+  }
+  return text.substring(0, maxChars - 3) + "...";
 }
 
 void drawBitcoinLogo(int x, int y) {
@@ -1271,7 +1345,14 @@ void drawStatusActionButton(int y) {
   bool wifiOk = WiFi.status() == WL_CONNECTED;
   const char* label = "REFRESH";
   uint16_t color = manualRefreshBusy ? rgb(75, 160, 255) : btcOrange();
-  if (!wifiOk && configPortalActive) {
+  if (!wifiOk && wifiSetupOfflineMode && hasConfiguredWifi() &&
+      !configPortalActive) {
+    label = "CONNECT";
+    color = btcOrange();
+  } else if (!wifiOk && wifiConnectingOrPending()) {
+    label = "DETAILS";
+    color = rgb(75, 160, 255);
+  } else if (!wifiOk && configPortalActive) {
     label = "OFFLINE";
     color = rgb(75, 160, 255);
   } else if (!wifiOk) {
@@ -1601,6 +1682,57 @@ bool shouldShowConfigPortalScreen() {
 
 void drawConfigPortalScreen() {
   drawBase();
+  if (portalConnectPending) {
+    drawCenteredText("Connecting WiFi", 27, 2, btcOrange());
+    display.setTextDatum(middle_center);
+    display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+    display.drawString("NETWORK", SCREEN_W / 2, 49, 1);
+    display.setTextColor(rgb(250, 250, 244), TFT_BLACK);
+    display.drawString(compactDisplayText(portalConnectSsid, 24), SCREEN_W / 2,
+                       70, 2);
+    display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+    display.drawString("setup hotspot stays on", SCREEN_W / 2, 94, 1);
+
+    display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+    display.drawString("OPEN", SCREEN_W / 2, 116, 1);
+    display.setTextColor(btcOrange(), TFT_BLACK);
+    display.drawString("192.168.4.1", SCREEN_W / 2, 134, 2);
+
+    display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+    display.drawString("AP", SCREEN_W / 2, 156, 1);
+    display.setTextColor(rgb(250, 250, 244), TFT_BLACK);
+    display.drawString(SETUP_AP_SSID, SCREEN_W / 2, 174, 1);
+
+    display.fillRoundRect(46, 196, 148, 28, 8, rgb(16, 18, 18));
+    display.drawRoundRect(46, 196, 148, 28, 8, rgb(75, 160, 255));
+    display.setTextColor(rgb(75, 160, 255), rgb(16, 18, 18));
+    display.drawString("OFFLINE MODE", SCREEN_W / 2, 210, 2);
+    return;
+  }
+
+  if (portalConnectError.length()) {
+    drawCenteredText("WiFi failed", 34, 2, rgb(238, 76, 76));
+    display.setTextDatum(middle_center);
+    display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+    display.drawString("NETWORK", SCREEN_W / 2, 62, 1);
+    display.setTextColor(rgb(250, 250, 244), TFT_BLACK);
+    display.drawString(compactDisplayText(portalConnectSsid, 24), SCREEN_W / 2,
+                       82, 2);
+    display.setTextColor(rgb(238, 76, 76), TFT_BLACK);
+    display.drawString(compactDisplayText(portalConnectError, 28), SCREEN_W / 2,
+                       108, 1);
+    display.setTextColor(btcOrange(), TFT_BLACK);
+    display.drawString("192.168.4.1", SCREEN_W / 2, 136, 2);
+    display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+    display.drawString("fix WiFi on setup page", SCREEN_W / 2, 160, 1);
+
+    display.fillRoundRect(46, 196, 148, 28, 8, rgb(16, 18, 18));
+    display.drawRoundRect(46, 196, 148, 28, 8, rgb(75, 160, 255));
+    display.setTextColor(rgb(75, 160, 255), rgb(16, 18, 18));
+    display.drawString("OFFLINE MODE", SCREEN_W / 2, 210, 2);
+    return;
+  }
+
   drawCenteredText("WiFi hotspot ON", 32, 2, btcOrange());
   display.setTextDatum(middle_center);
   display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
@@ -1627,6 +1759,79 @@ void drawConfigPortalScreen() {
   display.drawString("OFFLINE MODE", SCREEN_W / 2, 210, 2);
 }
 
+void drawWifiDetailsStatusPage() {
+  display.setTextDatum(middle_center);
+  display.setTextColor(rgb(150, 140, 124), TFT_BLACK);
+  display.drawString("network", SCREEN_W / 2, 76, 1);
+  display.setTextColor(rgb(250, 250, 244), TFT_BLACK);
+  display.drawString(compactDisplayText(wifiConnectingSsid(), 24),
+                     SCREEN_W / 2, 98, 2);
+
+  String mode = "idle";
+  uint16_t modeColor = rgb(150, 140, 124);
+  if (WiFi.status() == WL_CONNECTED) {
+    mode = "connected";
+    modeColor = rgb(45, 220, 120);
+  } else if (wifiConnecting()) {
+    mode = "connecting " + String(wifiConnectingElapsedSec()) + "s";
+    modeColor = rgb(75, 160, 255);
+  } else if (wifiConnectPending()) {
+    mode = "connecting";
+    modeColor = rgb(75, 160, 255);
+  } else if (configPortalActive) {
+    mode = "hotspot";
+    modeColor = btcOrange();
+  } else if (wifiSetupOfflineMode) {
+    mode = "offline mode";
+    modeColor = rgb(75, 160, 255);
+  } else {
+    mode = "disconnected";
+    modeColor = rgb(238, 76, 76);
+  }
+
+  drawStatusRow(122, "Mode", mode, modeColor);
+  drawStatusRow(140, "Status", String(wifiStatusName(WiFi.status())),
+                modeColor);
+  drawStatusRow(158, "Last", lastWifiStatus, rgb(250, 250, 244));
+  if (WiFi.status() == WL_CONNECTED) {
+    drawStatusRow(176, "IP", WiFi.localIP().toString(), rgb(250, 250, 244));
+    drawStatusRow(194, "RSSI", String(WiFi.RSSI()) + " dBm", modeColor);
+  } else if (wifiSetupOfflineMode && hasConfiguredWifi()) {
+    drawStatusRow(176, "Action", "tap CONNECT", btcOrange());
+  } else if (nextWifiAttemptMs > millis()) {
+    drawStatusRow(176, "Retry",
+                  String((nextWifiAttemptMs - millis()) / 1000UL) + "s",
+                  btcOrange());
+  } else {
+    drawStatusRow(176, "Retry", "now", btcOrange());
+  }
+
+  if (WiFi.status() != WL_CONNECTED && wifiSetupOfflineMode &&
+      hasConfiguredWifi()) {
+    display.fillRoundRect(28, 198, 84, 26, 8, rgb(16, 18, 18));
+    display.drawRoundRect(28, 198, 84, 26, 8, btcOrange());
+    display.setTextDatum(middle_center);
+    display.setTextColor(btcOrange(), rgb(16, 18, 18));
+    display.drawString("CONNECT", 70, 211, 2);
+
+    display.fillRoundRect(128, 198, 84, 26, 8, rgb(16, 18, 18));
+    display.drawRoundRect(128, 198, 84, 26, 8, rgb(75, 160, 255));
+    display.setTextColor(rgb(75, 160, 255), rgb(16, 18, 18));
+    display.drawString("HOTSPOT", 170, 211, 2);
+  } else if (WiFi.status() != WL_CONNECTED) {
+    display.fillRoundRect(28, 198, 84, 26, 8, rgb(16, 18, 18));
+    display.drawRoundRect(28, 198, 84, 26, 8, btcOrange());
+    display.setTextDatum(middle_center);
+    display.setTextColor(btcOrange(), rgb(16, 18, 18));
+    display.drawString("HOTSPOT", 70, 211, 2);
+
+    display.fillRoundRect(128, 198, 84, 26, 8, rgb(16, 18, 18));
+    display.drawRoundRect(128, 198, 84, 26, 8, rgb(75, 160, 255));
+    display.setTextColor(rgb(75, 160, 255), rgb(16, 18, 18));
+    display.drawString("OFFLINE", 170, 211, 2);
+  }
+}
+
 void drawStatusScreen() {
   drawBase();
   drawCenteredText("System", 24, 2, btcOrange());
@@ -1641,6 +1846,9 @@ void drawStatusScreen() {
     String wifiLabel = "WiFi OFF";
     if (wifiOk) {
       wifiLabel = "WiFi OK";
+    } else if (wifiConnectingOrPending()) {
+      wifiLabel = "CONNECTING";
+      wifiColor = rgb(75, 160, 255);
     } else if (configPortalActive) {
       wifiLabel = "HOTSPOT";
       wifiColor = btcOrange();
@@ -1659,12 +1867,23 @@ void drawStatusScreen() {
     if (wifiOk) {
       drawStatusRow(84, "RSSI", String(WiFi.RSSI()) + " dBm", wifiColor);
       drawStatusRow(100, "IP", WiFi.localIP().toString(), rgb(250, 250, 244));
+    } else if (wifiConnectingOrPending()) {
+      drawStatusRow(84, "SSID", compactDisplayText(wifiConnectingSsid(), 18),
+                    rgb(250, 250, 244));
+      String state = "connecting";
+      if (!wifiConnecting() && nextWifiAttemptMs > millis()) {
+        state = "retry " + String((nextWifiAttemptMs - millis()) / 1000UL) +
+                "s";
+      }
+      drawStatusRow(100, "State", state, wifiColor);
     } else if (configPortalActive) {
       drawStatusRow(84, "Setup AP", SETUP_AP_SSID, btcOrange());
       drawStatusRow(100, "Open", WiFi.softAPIP().toString(), btcOrange());
     } else if (wifiSetupOfflineMode) {
       drawStatusRow(84, "Status", "Offline mode", rgb(75, 160, 255));
-      drawStatusRow(100, "Setup", "tap HOTSPOT", btcOrange());
+      drawStatusRow(100, hasConfiguredWifi() ? "Action" : "Setup",
+                    hasConfiguredWifi() ? "tap CONNECT" : "tap HOTSPOT",
+                    btcOrange());
     } else {
       drawStatusRow(84, "Status", lastWifiStatus, wifiColor);
       drawStatusRow(100, "Retry", "10s", btcOrange());
@@ -1692,8 +1911,10 @@ void drawStatusScreen() {
     drawStatusRow(184, "Fee",
                   feeFastest >= 0 ? String(feeFastest) + " sat/vB" : "--",
                   feeColor(feeFastest));
-  } else {
+  } else if (statusPage == 2) {
     drawBrightnessStatusPage();
+  } else {
+    drawWifiDetailsStatusPage();
   }
 }
 
@@ -2077,6 +2298,7 @@ const char* wifiStatusName(wl_status_t status) {
 bool ensureWifi(String& status) {
   handleConfigPortal();
   if (WiFi.status() == WL_CONNECTED) {
+    wifiConnectAttemptActive = false;
     configureClockIfNeeded();
     status = "WiFi OK";
     lastWifiStatus = status;
@@ -2089,11 +2311,16 @@ bool ensureWifi(String& status) {
     return false;
   }
 
+  if (wifiSetupOfflineMode && !configPortalActive) {
+    status = "Offline mode";
+    lastWifiStatus = status;
+    return false;
+  }
+
   if (millis() < nextWifiAttemptMs) {
     status = lastWifiStatus;
     return false;
   }
-  nextWifiAttemptMs = millis() + WIFI_RETRY_MS;
 
   if (!hasConfiguredWifi()) {
     status = "WiFi not set";
@@ -2105,17 +2332,51 @@ bool ensureWifi(String& status) {
   WiFi.setSleep(false);
   String ssid = activeWifiSsid();
   String password = activeWifiPassword();
+  wifiConnectAttemptActive = true;
+  wifiConnectAttemptStartedMs = millis();
+  wifiConnectAttemptSsid = ssid;
+  status = "WiFi connecting";
+  lastWifiStatus = status;
+  nextWifiAttemptMs = 0;
   WiFi.begin(ssid.c_str(), password.c_str());
+  if (currentScreen == Screen::Status) {
+    renderCurrentScreen(false);
+  }
 
   uint32_t start = millis();
+  uint32_t lastConnectRenderMs = start;
   while (WiFi.status() != WL_CONNECTED &&
          millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
     handleTouch();
     handleConfigPortal();
+    if (wifiSetupOfflineMode || (configPortalActive && !portalConnectPending)) {
+      break;
+    }
+    if (currentScreen == Screen::Status &&
+        millis() - lastConnectRenderMs >= 1000) {
+      lastConnectRenderMs = millis();
+      renderCurrentScreen(false);
+    }
     delay(50);
   }
 
+  if (wifiSetupOfflineMode && !configPortalActive) {
+    wifiConnectAttemptActive = false;
+    status = "Offline mode";
+    lastWifiStatus = status;
+    renderCurrentScreen(false);
+    return false;
+  }
+
+  if (configPortalActive && !portalConnectPending) {
+    wifiConnectAttemptActive = false;
+    status = lastWifiStatus;
+    renderCurrentScreen(false);
+    return false;
+  }
+
   if (WiFi.status() == WL_CONNECTED) {
+    wifiConnectAttemptActive = false;
     configureClockIfNeeded();
     status = "WiFi OK";
     lastWifiStatus = status;
@@ -2129,7 +2390,12 @@ bool ensureWifi(String& status) {
   } else {
     status = "WiFi " + String(wifiStatusName(wifiStatus));
   }
+  wifiConnectAttemptActive = false;
   lastWifiStatus = status;
+  nextWifiAttemptMs = millis() + WIFI_CONNECT_RETRY_MS;
+  if (currentScreen == Screen::Status) {
+    renderCurrentScreen(false);
+  }
   return false;
 }
 
@@ -2823,15 +3089,49 @@ bool handleStatusControlTap(uint16_t x, uint16_t y) {
     adjustBrightness(brightnessDirection * BRIGHTNESS_STEP_PCT);
     return true;
   }
+  if (statusPage == 0 && WiFi.status() != WL_CONNECTED && x >= 48 &&
+      x <= 192 && y >= 47 && y <= 78) {
+    statusPage = 3;
+    renderCurrentScreen(false);
+    return true;
+  }
   if (statusPage == 0 && x >= 56 && x <= 184 && y >= 102 && y <= 144) {
     if (WiFi.status() == WL_CONNECTED) {
       requestManualRefresh();
+    } else if (wifiSetupOfflineMode && hasConfiguredWifi() &&
+               !configPortalActive) {
+      requestWifiReconnect();
+    } else if (wifiConnectingOrPending()) {
+      statusPage = 3;
+      renderCurrentScreen(false);
     } else if (configPortalActive) {
       enterWifiOfflineMode();
     } else {
       requestConfigPortal();
     }
     return true;
+  }
+  if (statusPage == 3 && WiFi.status() != WL_CONNECTED && y >= 190 &&
+      y <= 228) {
+    if (wifiSetupOfflineMode && hasConfiguredWifi()) {
+      if (x >= 28 && x <= 112) {
+        requestWifiReconnect();
+        return true;
+      }
+      if (x >= 128 && x <= 212) {
+        requestConfigPortal();
+        return true;
+      }
+    } else {
+      if (x >= 28 && x <= 112) {
+        requestConfigPortal();
+        return true;
+      }
+      if (x >= 128 && x <= 212) {
+        enterWifiOfflineMode();
+        return true;
+      }
+    }
   }
   return false;
 }
