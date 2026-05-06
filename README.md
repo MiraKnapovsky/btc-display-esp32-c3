@@ -32,7 +32,8 @@ Known hardware from this build:
 - BTC/USDT price from Binance
 - 24 hour percent and dollar move
 - 24 hour, 30 day and 1 year charts
-- Chart refresh intervals: 24H every 5 minutes, 30D every 2 hours, 1Y every 6 hours
+- Refresh intervals: price every 2 minutes, 24H chart every 15 minutes, 30D chart every 6 hours, 1Y chart every 24 hours
+- Fear & Greed refreshes every 6 hours; block height and mempool fees refresh every 5 minutes
 - Fear & Greed index
 - Current Bitcoin block height and halving countdown
 - Mempool fee panel
@@ -41,6 +42,7 @@ Known hardware from this build:
 - Freshness indicator after data becomes older than 10 minutes
 - Wi-Fi/status menu with connect, hotspot and offline controls
 - Brightness settings with tap and hold controls
+- Automatic page scrolling every 5 minutes
 - Network backoff to avoid freezing the UI when internet is down
 
 ## Wi-Fi setup
