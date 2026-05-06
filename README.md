@@ -1,20 +1,21 @@
-# BTC display for ESP32-2424S012C-I-Y(B)
+# BTC Display for ESP32-2424S012C-I-Y(B)
 
-Firmware for a small round ESP32-C3 Bitcoin dashboard. It shows the current BTC price, 24 hour, 30 day and 1 year charts, Fear & Greed index, halving/block data, mempool fees, connection status, cache age and display brightness settings.
+Firmware for a small round ESP32-C3 Bitcoin dashboard with touch controls, cached data, Wi-Fi setup over hotspot, and automatic page scrolling.
 
 ## Device
 
-Tested on the black shell `ESP32-2424S012C-I-Y(B)` board, sold as a 1.28 inch capacitive touch circular ESP32 display.
+Tested on the black shell `ESP32-2424S012C-I-Y(B)` 1.28 inch capacitive touch circular ESP32 display.
 
 Device listing: [ESP32-C3 1.28 inch circular capacitive touch display](https://www.alibaba.com/product-detail/ESP32-C3-1-28-inch-circular_1601475073494.html)
 
-Known hardware from this build:
+Hardware used by this firmware:
 
 - MCU: `ESP32-C3-MINI-1U`
 - Display: 240 x 240 round `GC9A01` SPI panel
-- Touch: capacitive `CST816` compatible controller on I2C address `0x15` (SDA GPIO 4, SCL GPIO 5, INT GPIO 0, RST GPIO 1)
-- Backlight: PWM on GPIO 3
+- Touch: capacitive `CST816` compatible controller on I2C address `0x15`
 - Display SPI: SCLK GPIO 6, MOSI GPIO 7, DC GPIO 2, CS GPIO 10
+- Touch I2C: SDA GPIO 4, SCL GPIO 5, INT GPIO 0, RST GPIO 1
+- Backlight: PWM on GPIO 3
 
 ## Screens
 
@@ -29,73 +30,64 @@ Known hardware from this build:
 
 ## Features
 
-- BTC/USDT price from Binance
-- 24 hour percent and dollar move
-- 24 hour, 30 day and 1 year charts
-- Refresh intervals: price every 2 minutes, 24H chart every 15 minutes, 30D chart every 6 hours, 1Y chart every 24 hours
-- Fear & Greed refreshes every 6 hours; block height and mempool fees refresh every 5 minutes
+- BTC/USDT price with 24 hour movement, high and low
+- 24 hour, 30 day and 1 year BTC charts
 - Fear & Greed index
-- Current Bitcoin block height and halving countdown
+- Bitcoin block height and halving countdown
 - Mempool fee panel
-- Configurable display time by UTC offset
-- Cached last data in flash, so the display can show old data after restart or without internet
-- Freshness indicator after data becomes older than 10 minutes
-- Wi-Fi/status menu with connect, hotspot and offline controls
-- Brightness settings with tap and hold controls
+- Cached data after restart or without internet
+- Stale-data dot only when a panel misses its expected refresh window
+- Wi-Fi setup hotspot with browser configuration page
+- Status menu with `CONNECT`, `HOTSPOT` and `OFFLINE` actions
+- Configurable UTC offset
+- Display brightness page with tap and hold controls
 - Automatic page scrolling every 5 minutes
-- Network backoff to avoid freezing the UI when internet is down
 
-## Wi-Fi setup
+## Refresh Intervals
 
-The display can be configured in two ways.
+| Data | Interval |
+| --- | ---: |
+| BTC price | 2 minutes |
+| 24H chart | 15 minutes |
+| 30D chart | 6 hours |
+| 1Y chart | 24 hours |
+| Fear & Greed | 6 hours |
+| Block height | 5 minutes |
+| Mempool fees | 5 minutes |
 
-### Setup hotspot
+## Wi-Fi Setup
 
-If the display cannot connect to Wi-Fi, open the system menu on the display and tap `HOTSPOT` to start the setup hotspot:
+Open the status menu from the left or right edge of the display and tap `HOTSPOT`.
 
-- SSID: `BTC-Display-Setup`
-- Password: `btcwifi123`
+- Setup SSID: `BTC-Display-Setup`
+- Setup password: `btcwifi123`
 - Browser address: `http://192.168.4.1`
 
-Open the page from a notebook or phone, scan nearby networks, then save the SSID and password. The saved network is stored in the ESP32 flash and takes priority over the compile-time credentials.
-
-After saving Wi-Fi details, the setup page shows live connection status. The setup hotspot stays online while the display is connecting, then turns off a few seconds after a successful connection. If connection fails, the hotspot stays online and the page shows the Wi-Fi status so the network name or password can be corrected.
-
-When the setup hotspot is active, the display shows the hotspot SSID, password and `192.168.4.1` address directly on the screen. Tap `OFFLINE MODE` on the display to hide the hotspot and keep using cached/offline screens. In the status menu, tap `HOTSPOT` to start the setup hotspot again.
-
-The same setup page also lets you choose the display time offset from `UTC -12:00` to `UTC +14:00`.
+From the setup page, scan nearby networks, choose a 2.4 GHz Wi-Fi network, enter the password, and save. The hotspot stays active while the display connects and turns off shortly after a successful connection.
 
 ![Wi-Fi setup page](docs/screenshots/web-setup.png)
 
-### Display Wi-Fi controls
+The setup page can also change the display UTC offset.
 
-Open the status menu from the left or right edge of the display. When Wi-Fi is not connected, tap the Wi-Fi status or `DETAILS` to open the Wi-Fi detail page.
+## Touch Controls
 
-- `CONNECTING`: the display is trying to connect or waiting for the next retry.
-- `HOTSPOT`: starts the setup hotspot so Wi-Fi can be changed from a browser.
-- `OFFLINE`: stops Wi-Fi retry attempts and keeps showing cached data.
-- `CONNECT`: exits offline mode and tries the saved Wi-Fi again.
+- Swipe bottom to top or tap lower half: next page
+- Swipe top to bottom or tap upper half: previous page
+- Tap left or right edge: open or leave the status menu
+- Status menu: tap Wi-Fi status or `DETAILS` for Wi-Fi details
+- Brightness page: tap or hold `-` / `+`
 
-### Compile-time fallback
+## Compile-Time Wi-Fi Fallback
 
-The real Wi-Fi credentials are intentionally not committed.
+The browser setup is preferred, but compile-time credentials can be used as a fallback.
 
 1. Copy `include/secrets.example.h` to `include/secrets.h`.
 2. Edit `include/secrets.h`.
 3. Use a 2.4 GHz Wi-Fi network.
 
-Example:
+`include/secrets.h` is ignored by git.
 
-```cpp
-#pragma once
-
-constexpr const char* WIFI_SSID = "YOUR_WIFI_SSID";
-constexpr const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
-```
-
-`include/secrets.h` is ignored by git, so your Wi-Fi password should stay only on your computer.
-
-## Build and upload
+## Build and Upload
 
 This project uses PlatformIO.
 
@@ -106,28 +98,8 @@ platformio run -e esp32-c3-devkitm-1 -t upload
 
 The default `platformio.ini` uses `COM1`. Change `upload_port` and `monitor_port` if your board appears on a different serial port.
 
-Serial monitor:
-
-```powershell
-platformio device monitor -e esp32-c3-devkitm-1
-```
-
-## Touch controls
-
-- Swipe from bottom to top: next page
-- Swipe from top to bottom: previous page
-- Tap lower half: next page
-- Tap upper half: previous page
-- Tap left or right edge: open or leave the status menu
-- In the status menu, scroll/tap between status pages
-- On brightness page, tap or hold `-` / `+`
-
-## Data sources
+## Data Sources
 
 - Price and candles: Binance public API
 - Fear & Greed: Alternative.me API
 - Blocks and fees: mempool.space API
-
-## Notes
-
-HTTPS is used, but the firmware currently calls `setInsecure()` because certificate handling on this small Arduino build is kept simple.
