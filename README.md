@@ -2,6 +2,12 @@
 
 Firmware for a small round ESP32-C3 Bitcoin dashboard with touch controls, cached data, Wi-Fi setup over hotspot, and automatic page scrolling.
 
+## Demo
+
+[![BTC display video demo](assets/btc-display-demo.jpg)](assets/btc-display-demo.mp4)
+
+Click the preview to watch the device in action.
+
 ## Device
 
 Tested on the black shell `ESP32-2424S012C-I-Y(B)` 1.28 inch capacitive touch circular ESP32 display.
