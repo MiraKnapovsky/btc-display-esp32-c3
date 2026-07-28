@@ -4,7 +4,7 @@ Firmware for a small round ESP32-C3 Bitcoin dashboard with touch controls, cache
 
 ## Demo
 
-[![BTC display video demo](assets/btc-display-demo.jpg)](assets/btc-display-demo.mp4)
+[![BTC display video demo](assets/btc-display-demo.jpg)](https://cdn.jsdelivr.net/gh/MiraKnapovsky/btc-display-esp32-c3@main/assets/btc-display-demo.mp4)
 
 Click the preview to watch the device in action.
 
